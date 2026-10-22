@@ -23,14 +23,13 @@ func NewWorkerPool(workers int, broker Broker, mux *ServeMux, queueName string) 
 	}
 }
 
+// start the worker pool then dequeue then process the job
 func (p *WorkerPool) Start(ctx context.Context) {
 	var wg sync.WaitGroup
 
 	for i := 0; i < p.workers; i++ {
-		wg.Add(1)
 
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 
 			for {
 				if ctx.Err() != nil {
@@ -57,7 +56,7 @@ func (p *WorkerPool) Start(ctx context.Context) {
 					log.Printf("job %s failed: %v", job.ID, err)
 				}
 			}
-		}()
+		})
 	}
 
 	<-ctx.Done()

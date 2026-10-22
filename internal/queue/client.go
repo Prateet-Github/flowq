@@ -20,6 +20,7 @@ func NewClient(b Broker) *Client {
 	}
 }
 
+// the api to enqueue job, broker.Enqueue willl do the actual enqueueing of the job
 func (c *Client) Enqueue(ctx context.Context, job *Job) error {
 	if job == nil {
 		return errors.New("job cannot be nil")
