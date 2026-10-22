@@ -33,5 +33,3 @@ func (b *RedisBroker) Enqueue(ctx context.Context, job *queue.Job) error {
 
 	return nil
 }
-
-var _ Broker = (*RedisBroker)(nil)

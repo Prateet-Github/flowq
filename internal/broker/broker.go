@@ -6,6 +6,6 @@ import (
 	"github.com/Prateet-Github/flowq/internal/queue"
 )
 
-type Broker interface {
+type Redis interface {
 	Enqueue(ctx context.Context, job *queue.Job) error
 }
