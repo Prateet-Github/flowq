@@ -7,6 +7,7 @@ import (
 
 type Broker interface {
 	Enqueue(ctx context.Context, job *Job) error
+	Dequeue(ctx context.Context, queueName string) (*Job, error)
 }
 
 type Client struct {

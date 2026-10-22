@@ -27,4 +27,11 @@ func main() {
 	}
 
 	log.Printf("Enqueued job: %s", job.ID)
+
+	dequeuedJob, err := redisBroker.Dequeue(ctx, "default")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("Dequeued job: %+v", dequeuedJob)
 }

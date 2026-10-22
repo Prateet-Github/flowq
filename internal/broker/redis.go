@@ -33,3 +33,19 @@ func (b *RedisBroker) Enqueue(ctx context.Context, job *queue.Job) error {
 
 	return nil
 }
+
+func (b *RedisBroker) Dequeue(ctx context.Context, queueName string) (*queue.Job, error) {
+	key := fmt.Sprintf("{q}:pending:%s", queueName)
+
+	data, err := b.client.LPop(ctx, key).Bytes()
+	if err != nil {
+		return nil, err
+	}
+
+	var job queue.Job
+	if err := json.Unmarshal(data, &job); err != nil {
+		return nil, fmt.Errorf("unmarshal job: %w", err)
+	}
+
+	return &job, nil
+}
