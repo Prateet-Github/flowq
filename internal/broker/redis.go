@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/Prateet-Github/flowq/internal/queue"
@@ -39,6 +40,9 @@ func (b *RedisBroker) Dequeue(ctx context.Context, queueName string) (*queue.Job
 
 	data, err := b.client.LPop(ctx, key).Bytes()
 	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return nil, nil
+		}
 		return nil, err
 	}
 

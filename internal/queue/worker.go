@@ -4,19 +4,22 @@ import (
 	"context"
 	"log"
 	"sync"
+	"time"
 )
 
 type WorkerPool struct {
-	workers int
-	mux     *ServeMux
-	jobs    chan *Job
+	workers   int
+	mux       *ServeMux
+	broker    Broker
+	queueName string
 }
 
-func NewWorkerPool(workers int, mux *ServeMux) *WorkerPool {
+func NewWorkerPool(workers int, broker Broker, mux *ServeMux, queueName string) *WorkerPool {
 	return &WorkerPool{
-		workers: workers,
-		mux:     mux,
-		jobs:    make(chan *Job),
+		workers:   workers,
+		broker:    broker,
+		mux:       mux,
+		queueName: queueName,
 	}
 }
 
@@ -30,33 +33,33 @@ func (p *WorkerPool) Start(ctx context.Context) {
 			defer wg.Done()
 
 			for {
-				select {
-				case <-ctx.Done():
+				if ctx.Err() != nil {
 					return
+				}
 
-				case job, ok := <-p.jobs:
-					if !ok {
+				job, err := p.broker.Dequeue(ctx, p.queueName)
+				if err != nil {
+					if ctx.Err() != nil {
 						return
 					}
 
-					if err := p.mux.Process(ctx, job); err != nil {
-						log.Printf("job %s failed: %v", job.ID, err)
-					}
+					log.Printf("dequeue failed: %v", err)
+					time.Sleep(time.Second)
+					continue
+				}
+
+				if job == nil {
+					time.Sleep(100 * time.Millisecond)
+					continue
+				}
+
+				if err := p.mux.Process(ctx, job); err != nil {
+					log.Printf("job %s failed: %v", job.ID, err)
 				}
 			}
 		}()
 	}
 
 	<-ctx.Done()
-	close(p.jobs)
 	wg.Wait()
-}
-
-func (p *WorkerPool) Submit(ctx context.Context, job *Job) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case p.jobs <- job:
-		return nil
-	}
 }
