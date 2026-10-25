@@ -8,6 +8,7 @@ import (
 type Broker interface {
 	Enqueue(ctx context.Context, job *Job) error
 	Dequeue(ctx context.Context, queueName string) (*Job, error)
+	Ack(ctx context.Context, jobID string) error
 }
 
 type Client struct {

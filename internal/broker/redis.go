@@ -103,3 +103,28 @@ func (b *RedisBroker) Dequeue(ctx context.Context, queueName string) (*queue.Job
 
 	return &job, nil
 }
+
+func (b *RedisBroker) Ack(ctx context.Context, jobID string) error {
+	script := redis.NewScript(`
+		local job_key = ARGV[1] .. ARGV[2]
+
+		redis.call("ZREM", KEYS[1], ARGV[2])
+		redis.call("DEL", job_key)
+
+		return 1
+	`)
+
+	err := script.Run(
+		ctx,
+		b.client,
+		[]string{"{q}:active"},
+		"{q}:job:",
+		jobID,
+	).Err()
+
+	if err != nil {
+		return fmt.Errorf("ack job %s: %w", jobID, err)
+	}
+
+	return nil
+}

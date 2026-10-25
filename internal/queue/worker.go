@@ -55,6 +55,11 @@ func (p *WorkerPool) Start(ctx context.Context) {
 				if err := p.mux.Process(ctx, job); err != nil {
 					log.Printf("job %s failed: %v", job.ID, err)
 				}
+
+				if err := p.broker.Ack(ctx, job.ID); err != nil {
+					log.Printf("ack failed for job %s: %v", job.ID, err)
+				}
+
 			}
 		})
 	}
