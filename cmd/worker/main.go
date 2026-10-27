@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Prateet-Github/flowq/internal/broker"
 	"github.com/Prateet-Github/flowq/internal/queue"
@@ -26,6 +27,8 @@ func main() {
 	defer rdb.Close()
 
 	redisBroker := broker.NewRedisBroker(rdb)
+
+	go queue.StartRecovery(ctx, redisBroker, 5*time.Second)
 
 	mux := queue.NewServeMux()
 	mux.Handle("send_email", queue.HandlerFunc(func(ctx context.Context, job *queue.Job) error {
