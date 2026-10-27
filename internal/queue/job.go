@@ -7,12 +7,13 @@ import (
 )
 
 type Job struct {
-	ID       string        `json:"id"`
-	Type     string        `json:"type"`
-	Payload  []byte        `json:"payload"`
-	Queue    string        `json:"queue"`
-	MaxRetry int           `json:"max_retry"`
-	Timeout  time.Duration `json:"timeout"`
+	ID         string        `json:"id"`
+	Type       string        `json:"type"`
+	Payload    []byte        `json:"payload"`
+	Queue      string        `json:"queue"`
+	MaxRetry   int           `json:"max_retry"`
+	Timeout    time.Duration `json:"timeout"`
+	LeaseToken string        `json:"lease_token,omitempty"`
 }
 
 func NewJob(jobType string, payload []byte) *Job {

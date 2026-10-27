@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Prateet-Github/flowq/internal/queue"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -36,30 +37,12 @@ func (b *RedisBroker) Enqueue(ctx context.Context, job *queue.Job) error {
 	return nil
 }
 
-// func (b *RedisBroker) Dequeue(ctx context.Context, queueName string) (*queue.Job, error) {
-// 	key := fmt.Sprintf("{q}:pending:%s", queueName)
-
-// 	data, err := b.client.LPop(ctx, key).Bytes()
-// 	if err != nil {
-// 		if errors.Is(err, redis.Nil) {
-// 			return nil, nil
-// 		}
-// 		return nil, err
-// 	}
-
-// 	var job queue.Job
-// 	if err := json.Unmarshal(data, &job); err != nil {
-// 		return nil, fmt.Errorf("unmarshal job: %w", err)
-// 	}
-
-// 	return &job, nil
-// }
-
 func (b *RedisBroker) Dequeue(ctx context.Context, queueName string) (*queue.Job, error) {
 	pendingKey := fmt.Sprintf("{q}:pending:%s", queueName)
 	activeKey := "{q}:active"
 	jobPrefix := "{q}:job:"
 	leaseUntil := time.Now().Add(30 * time.Second).UnixMilli()
+	leaseToken := uuid.NewString()
 
 	script := redis.NewScript(`
 		local job_data = redis.call("LPOP", KEYS[1])
@@ -73,7 +56,8 @@ func (b *RedisBroker) Dequeue(ctx context.Context, queueName string) (*queue.Job
 
 		redis.call("HSET", job_key,
 			"data", job_data,
-			"state", "active"
+			"state", "active",
+			"lease_token", ARGV[3]
 		)
 
 		redis.call("ZADD", KEYS[2], ARGV[2], job.id)
@@ -87,6 +71,7 @@ func (b *RedisBroker) Dequeue(ctx context.Context, queueName string) (*queue.Job
 		[]string{pendingKey, activeKey},
 		jobPrefix,
 		leaseUntil,
+		leaseToken,
 	).Text()
 
 	if err != nil {
@@ -101,29 +86,51 @@ func (b *RedisBroker) Dequeue(ctx context.Context, queueName string) (*queue.Job
 		return nil, fmt.Errorf("unmarshal job: %w", err)
 	}
 
+	job.LeaseToken = leaseToken
+
 	return &job, nil
 }
 
-func (b *RedisBroker) Ack(ctx context.Context, jobID string) error {
+func (b *RedisBroker) Ack(ctx context.Context, jobID, leaseToken string) error {
 	script := redis.NewScript(`
-		local job_key = ARGV[1] .. ARGV[2]
+		local job_id = ARGV[1]
+		local job_key = ARGV[2] .. job_id
+		local lease_token = ARGV[3]
 
-		redis.call("ZREM", KEYS[1], ARGV[2])
+		local current_token = redis.call("HGET", job_key, "lease_token")
+		if not current_token or current_token ~= lease_token then
+			return 0
+		end
+
+		local score = redis.call("ZSCORE", KEYS[1], job_id)
+		if not score then
+			return 0
+		end
+
+		if tonumber(score) <= tonumber(ARGV[4]) then
+			return 0
+		end
+
+		redis.call("ZREM", KEYS[1], job_id)
 		redis.call("DEL", job_key)
-
 		return 1
 	`)
 
-	err := script.Run(
+	result, err := script.Run(
 		ctx,
 		b.client,
 		[]string{"{q}:active"},
-		"{q}:job:",
 		jobID,
-	).Err()
-
+		"{q}:job:",
+		leaseToken,
+		time.Now().UnixMilli(),
+	).Int()
 	if err != nil {
 		return fmt.Errorf("ack job %s: %w", jobID, err)
+	}
+
+	if result == 0 {
+		return fmt.Errorf("cannot acknowledge job %s: lease expired or ownership lost", jobID)
 	}
 
 	return nil
@@ -151,7 +158,8 @@ func (b *RedisBroker) RecoverExpired(ctx context.Context) (int, error) {
 				local pending_key = "{q}:pending:" .. job.queue
 
 				redis.call("HSET", job_key, "state", "pending")
-				redis.call("RPUSH", pending_key, job_data)
+        redis.call("HDEL", job_key, "lease_token")
+        redis.call("RPUSH", pending_key, job_data)
 			end
 
 			redis.call("ZREM", active_key, job_id)
@@ -174,4 +182,52 @@ func (b *RedisBroker) RecoverExpired(ctx context.Context) (int, error) {
 	}
 
 	return result, nil
+}
+
+func (b *RedisBroker) RenewLease(ctx context.Context, jobID, leaseToken string) error {
+	leaseUntil := time.Now().Add(30 * time.Second).UnixMilli()
+
+	script := redis.NewScript(`
+		local job_key = ARGV[1] .. ARGV[2]
+		local job_id = ARGV[2]
+		local lease_token = ARGV[3]
+		local lease_until = ARGV[4]
+
+		local current_token = redis.call("HGET", job_key, "lease_token")
+		if not current_token or current_token ~= lease_token then
+			return 0
+		end
+
+		local score = redis.call("ZSCORE", KEYS[1], job_id)
+		if not score then
+			return 0
+		end
+
+		if tonumber(score) <= tonumber(ARGV[5]) then
+			return 0
+		end
+
+		redis.call("ZADD", KEYS[1], lease_until, job_id)
+		return 1
+	`)
+
+	result, err := script.Run(
+		ctx,
+		b.client,
+		[]string{"{q}:active"},
+		"{q}:job:",
+		jobID,
+		leaseToken,
+		leaseUntil,
+		time.Now().UnixMilli(),
+	).Int()
+	if err != nil {
+		return fmt.Errorf("renew lease for job %s: %w", jobID, err)
+	}
+
+	if result == 0 {
+		return fmt.Errorf("cannot renew lease for job %s: lease expired or ownership lost", jobID)
+	}
+
+	return nil
 }

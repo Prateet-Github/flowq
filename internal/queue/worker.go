@@ -52,11 +52,18 @@ func (p *WorkerPool) Start(ctx context.Context) {
 					continue
 				}
 
-				if err := p.mux.Process(ctx, job); err != nil {
-					log.Printf("job %s failed: %v", job.ID, err)
+				stopHeartbeat := StartHeartbeat(ctx, p.broker, job, 10*time.Second)
+
+				processErr := p.mux.Process(ctx, job)
+
+				stopHeartbeat()
+
+				if processErr != nil {
+					log.Printf("job %s failed: %v", job.ID, processErr)
+					continue
 				}
 
-				if err := p.broker.Ack(ctx, job.ID); err != nil {
+				if err := p.broker.Ack(ctx, job.ID, job.LeaseToken); err != nil {
 					log.Printf("ack failed for job %s: %v", job.ID, err)
 				}
 
