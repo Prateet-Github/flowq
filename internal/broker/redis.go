@@ -231,3 +231,67 @@ func (b *RedisBroker) RenewLease(ctx context.Context, jobID, leaseToken string) 
 
 	return nil
 }
+
+func (r *RedisBroker) ReleaseLease(
+	ctx context.Context,
+	jobID string,
+	leaseToken string,
+) error {
+	script := `
+		local jobKey = KEYS[1]
+		local activeKey = KEYS[2]
+
+		local currentToken = redis.call("HGET", jobKey, "lease_token")
+
+		if not currentToken or currentToken ~= ARGV[1] then
+			return 0
+		end
+
+		local leaseUntil = redis.call("ZSCORE", activeKey, ARGV[2])
+
+		if not leaseUntil or tonumber(leaseUntil) <= tonumber(ARGV[3]) then
+			return 0
+		end
+
+		local jobData = redis.call("HGET", jobKey, "data")
+
+		if not jobData then
+			return 0
+		end
+
+		local job = cjson.decode(jobData)
+		local queueName = job.queue or "default"
+		local pendingKey = "{q}:pending:" .. queueName
+
+		redis.call("RPUSH", pendingKey, jobData)
+		redis.call("ZREM", activeKey, ARGV[2])
+		redis.call("DEL", jobKey)
+
+		return 1
+	`
+
+	result, err := r.client.Eval(
+		ctx,
+		script,
+		[]string{
+			"{q}:job:" + jobID,
+			"{q}:active",
+		},
+		leaseToken,
+		jobID,
+		time.Now().UnixMilli(),
+	).Int()
+
+	if err != nil {
+		return err
+	}
+
+	if result == 0 {
+		return fmt.Errorf(
+			"cannot release lease for job %s: lease expired or ownership lost",
+			jobID,
+		)
+	}
+
+	return nil
+}

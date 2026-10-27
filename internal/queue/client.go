@@ -9,7 +9,9 @@ type Broker interface {
 	Enqueue(ctx context.Context, job *Job) error
 	Dequeue(ctx context.Context, queueName string) (*Job, error)
 	Ack(ctx context.Context, jobID, leaseToken string) error
+	RecoverExpired(ctx context.Context) (int, error)
 	RenewLease(ctx context.Context, jobID, leaseToken string) error
+	ReleaseLease(ctx context.Context, jobID, leaseToken string) error
 }
 
 type Client struct {

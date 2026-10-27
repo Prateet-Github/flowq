@@ -34,7 +34,14 @@ func main() {
 	mux.Handle("send_email", queue.HandlerFunc(func(ctx context.Context, job *queue.Job) error {
 		log.Printf("Processing job %s: %s", job.ID, job.Type)
 		log.Printf("Payload: %s", job.Payload)
-		return nil
+
+		select {
+		case <-time.After(5 * time.Second):
+			log.Printf("Finished job %s", job.ID)
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}))
 
 	pool := queue.NewWorkerPool(10, redisBroker, mux, "default")
