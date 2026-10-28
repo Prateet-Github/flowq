@@ -17,6 +17,7 @@ func setupRedisBroker(t *testing.T) (*RedisBroker, context.Context) {
 	ctx := context.Background()
 	client := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
+		DB:   15,
 	})
 
 	if err := client.Ping(ctx).Err(); err != nil {
@@ -27,6 +28,11 @@ func setupRedisBroker(t *testing.T) (*RedisBroker, context.Context) {
 		}
 
 		t.Skipf("Redis is not available: %v", err)
+	}
+
+	if err := client.FlushDB(ctx).Err(); err != nil {
+		client.Close()
+		t.Fatalf("failed to flush test database: %v", err)
 	}
 
 	t.Cleanup(func() {
