@@ -104,6 +104,7 @@ func (p *WorkerPool) Start(ctx context.Context) {
 
 				stopHeartbeat := StartHeartbeat(
 					jobCtx,
+					cancelJob,
 					p.broker,
 					job,
 					10*time.Second,

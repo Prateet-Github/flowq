@@ -8,6 +8,7 @@ import (
 
 func StartHeartbeat(
 	ctx context.Context,
+	cancel context.CancelFunc,
 	broker Broker,
 	job *Job,
 	interval time.Duration,
@@ -30,6 +31,7 @@ func StartHeartbeat(
 			case <-ticker.C:
 				if err := broker.RenewLease(ctx, job.ID, job.LeaseToken); err != nil {
 					log.Printf("heartbeat failed for job %s: %v", job.ID, err)
+					cancel()
 					return
 				}
 			}
