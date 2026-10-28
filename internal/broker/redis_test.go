@@ -16,7 +16,7 @@ func setupRedisBroker(t *testing.T) (*RedisBroker, context.Context) {
 
 	ctx := context.Background()
 	client := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
+		Addr: "127.0.0.1:6379",
 		DB:   15,
 	})
 
