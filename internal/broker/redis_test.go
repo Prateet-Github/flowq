@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -20,6 +21,11 @@ func setupRedisBroker(t *testing.T) (*RedisBroker, context.Context) {
 
 	if err := client.Ping(ctx).Err(); err != nil {
 		client.Close()
+
+		if os.Getenv("CI") == "true" {
+			t.Fatalf("Redis is required in CI but unavailable: %v", err)
+		}
+
 		t.Skipf("Redis is not available: %v", err)
 	}
 
