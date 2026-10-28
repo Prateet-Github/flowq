@@ -2,15 +2,9 @@ local active_key = KEYS[1]
 local job_prefix = ARGV[1]
 local now = tonumber(ARGV[2])
 
--- find jobs whose leases have expired
 local expired_jobs = redis.call(
-    "ZRANGEBYSCORE",
-    active_key,
-    "-inf",
-    now,
-    "LIMIT",
-    0,
-    100
+    "ZRANGEBYSCORE", active_key, "-inf", now,
+    "LIMIT", 0, 100
 )
 
 local recovered = 0
@@ -24,11 +18,13 @@ for _, job_id in ipairs(expired_jobs) do
         local pending_key = "{q}:pending:" .. job.queue
 
         redis.call("HSET", job_key, "state", "pending")
+        redis.call("HDEL", job_key, "lease_token")
         redis.call("RPUSH", pending_key, job_data)
+
+        recovered = recovered + 1
     end
 
     redis.call("ZREM", active_key, job_id)
-    recovered = recovered + 1
 end
 
 return recovered
