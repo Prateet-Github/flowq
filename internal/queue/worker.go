@@ -2,6 +2,8 @@ package queue
 
 import (
 	"context"
+
+	"errors"
 	"log"
 	"sync"
 	"time"
@@ -144,7 +146,17 @@ func (p *WorkerPool) Start(ctx context.Context) {
 				}
 
 				if processErr != nil {
-					log.Printf("job %s failed: %v", job.ID, processErr)
+					switch {
+					case errors.Is(processErr, ErrNonRetryable):
+						log.Printf("job %s failed permanently: %v", job.ID, processErr)
+
+					case errors.Is(processErr, ErrRetryable):
+						log.Printf("job %s failed with retryable error: %v", job.ID, processErr)
+
+					default:
+						log.Printf("job %s failed with unclassified error: %v", job.ID, processErr)
+					}
+
 					continue
 				}
 
