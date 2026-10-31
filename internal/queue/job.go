@@ -12,6 +12,7 @@ type Job struct {
 	Payload    []byte        `json:"payload"`
 	Queue      string        `json:"queue"`
 	MaxRetry   int           `json:"max_retry"`
+	Attempts   int           `json:"attempts"`
 	Timeout    time.Duration `json:"timeout"`
 	LeaseToken string        `json:"lease_token,omitempty"`
 }
@@ -23,6 +24,7 @@ func NewJob(jobType string, payload []byte) *Job {
 		Payload:  payload,
 		Queue:    "default",
 		MaxRetry: 3,
+		Attempts: 0,
 		Timeout:  30 * time.Second,
 	}
 }
