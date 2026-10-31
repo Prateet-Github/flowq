@@ -89,8 +89,14 @@ func (p *WorkerPool) Start(ctx context.Context) {
 					return
 				}
 
-				jobCtx, cancelJob := context.WithCancel(
+				jobTimeout := job.Timeout
+				if jobTimeout <= 0 {
+					jobTimeout = 30 * time.Second
+				}
+
+				jobCtx, cancelJob := context.WithTimeout(
 					context.WithoutCancel(ctx),
+					jobTimeout,
 				)
 
 				jobDone := make(chan struct{})

@@ -28,11 +28,17 @@ func (m *ServeMux) Handle(jobType string, handler Handler) {
 }
 
 // check the job type and call the appropriate handler
-func (m *ServeMux) Process(ctx context.Context, job *Job) error {
+func (m *ServeMux) Process(ctx context.Context, job *Job) (err error) {
 	handler, ok := m.handlers[job.Type]
 	if !ok {
 		return fmt.Errorf("queue: no handler registered for job type %q", job.Type)
 	}
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("queue: handler panic for job type %q: %v", job.Type, recovered)
+		}
+	}()
 
 	return handler.Handle(ctx, job)
 }
