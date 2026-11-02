@@ -1,10 +1,13 @@
-package queue
+package worker
 
 import (
 	"context"
 
 	"errors"
+
 	"github.com/Prateet-Github/flowq/internal/handler"
+	"github.com/Prateet-Github/flowq/internal/queue"
+
 	"log"
 	"sync"
 	"time"
@@ -13,13 +16,13 @@ import (
 type WorkerPool struct {
 	workers   int
 	mux       *handler.ServeMux
-	broker    Broker
+	broker    queue.Broker
 	queueName string
 }
 
 const ShutdownTimeout = 30 * time.Second
 
-func NewWorkerPool(workers int, broker Broker, mux *handler.ServeMux, queueName string) *WorkerPool {
+func NewWorkerPool(workers int, broker queue.Broker, mux *handler.ServeMux, queueName string) *WorkerPool {
 	return &WorkerPool{
 		workers:   workers,
 		broker:    broker,
@@ -153,11 +156,11 @@ func (p *WorkerPool) Start(ctx context.Context) {
 
 				if processErr != nil {
 					switch {
-					case errors.Is(processErr, ErrNonRetryable):
+					case errors.Is(processErr, queue.ErrNonRetryable):
 						log.Printf("job %s failed permanently: %v", job.ID, processErr)
 						continue
 
-					case errors.Is(processErr, ErrRetryable):
+					case errors.Is(processErr, queue.ErrRetryable):
 						job.Attempts++
 
 						if job.Attempts > job.MaxRetry {
@@ -170,7 +173,7 @@ func (p *WorkerPool) Start(ctx context.Context) {
 							continue
 						}
 
-						delay := RetryDelay(job.Attempts)
+						delay := queue.RetryDelay(job.Attempts)
 
 						retryCtx, cancel := context.WithTimeout(
 							context.Background(),

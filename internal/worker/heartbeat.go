@@ -1,4 +1,4 @@
-package queue
+package worker
 
 import (
 	"context"
@@ -6,12 +6,13 @@ import (
 	"time"
 
 	"github.com/Prateet-Github/flowq/internal/job"
+	"github.com/Prateet-Github/flowq/internal/queue"
 )
 
 func StartHeartbeat(
 	ctx context.Context,
 	cancel context.CancelFunc,
-	broker Broker,
+	broker queue.Broker,
 	job *job.Job,
 	interval time.Duration,
 ) func() {

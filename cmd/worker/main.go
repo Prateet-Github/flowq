@@ -11,7 +11,7 @@ import (
 	"github.com/Prateet-Github/flowq/internal/broker"
 	"github.com/Prateet-Github/flowq/internal/handler"
 	"github.com/Prateet-Github/flowq/internal/job"
-	"github.com/Prateet-Github/flowq/internal/queue"
+	"github.com/Prateet-Github/flowq/internal/worker"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -31,7 +31,7 @@ func main() {
 
 	redisBroker := broker.NewRedisBroker(rdb)
 
-	go queue.StartRecovery(ctx, redisBroker, 5*time.Second)
+	go worker.StartRecovery(ctx, redisBroker, 5*time.Second)
 
 	mux := handler.NewServeMux()
 	mux.Handle("send_email", handler.HandlerFunc(func(ctx context.Context, job *job.Job) error {
@@ -47,7 +47,7 @@ func main() {
 		}
 	}))
 
-	pool := queue.NewWorkerPool(10, redisBroker, mux, "default")
+	pool := worker.NewWorkerPool(10, redisBroker, mux, "default")
 
 	log.Println("FlowQ worker started")
 	pool.Start(ctx)
