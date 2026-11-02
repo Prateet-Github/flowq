@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"errors"
+	"github.com/Prateet-Github/flowq/internal/handler"
 	"log"
 	"sync"
 	"time"
@@ -11,14 +12,14 @@ import (
 
 type WorkerPool struct {
 	workers   int
-	mux       *ServeMux
+	mux       *handler.ServeMux
 	broker    Broker
 	queueName string
 }
 
 const ShutdownTimeout = 30 * time.Second
 
-func NewWorkerPool(workers int, broker Broker, mux *ServeMux, queueName string) *WorkerPool {
+func NewWorkerPool(workers int, broker Broker, mux *handler.ServeMux, queueName string) *WorkerPool {
 	return &WorkerPool{
 		workers:   workers,
 		broker:    broker,
