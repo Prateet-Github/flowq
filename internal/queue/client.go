@@ -17,6 +17,7 @@ type Broker interface {
 	ReleaseLease(ctx context.Context, jobID, leaseToken string) error
 	ScheduleRetry(ctx context.Context, job *job.Job, delay time.Duration) error
 	PromoteRetries(ctx context.Context, limit int) (int, error)
+	Dlq(ctx context.Context, jobID string, leaseToken string) error
 }
 
 type Client struct {

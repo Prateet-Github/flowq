@@ -35,6 +35,9 @@ var retryLua string
 //go:embed scripts/promote_retries.lua
 var promoteRetriesLua string
 
+//go:embed scripts/dlq.lua
+var dlqLua string
+
 var (
 	dequeueScript        = redis.NewScript(dequeueLua)
 	ackScript            = redis.NewScript(ackLua)
@@ -43,6 +46,7 @@ var (
 	releaseScript        = redis.NewScript(releaseLua)
 	retryScript          = redis.NewScript(retryLua)
 	promoteRetriesScript = redis.NewScript(promoteRetriesLua)
+	dlqScript            = redis.NewScript(dlqLua)
 )
 
 type RedisBroker struct {
@@ -238,4 +242,35 @@ func (b *RedisBroker) PromoteRetries(
 	}
 
 	return result, nil
+}
+
+func (b *RedisBroker) Dlq(
+	ctx context.Context,
+	jobID string,
+	leaseToken string,
+) error {
+	result, err := dlqScript.Run(
+		ctx,
+		b.client,
+		[]string{
+			"{q}:active",
+			"{q}:dlq",
+		},
+		jobID,
+		"{q}:job:",
+		leaseToken,
+	).Int()
+
+	if err != nil {
+		return fmt.Errorf("dead-letter job %s: %w", jobID, err)
+	}
+
+	if result == 0 {
+		return fmt.Errorf(
+			"cannot dead-letter job %s: lease expired or ownership lost",
+			jobID,
+		)
+	}
+
+	return nil
 }

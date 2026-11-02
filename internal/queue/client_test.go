@@ -3,9 +3,10 @@ package queue
 import (
 	"context"
 	"errors"
-	"github.com/Prateet-Github/flowq/internal/job"
 	"testing"
 	"time"
+
+	"github.com/Prateet-Github/flowq/internal/job"
 )
 
 type mockBroker struct {
@@ -79,4 +80,12 @@ func (m *mockBroker) PromoteRetries(
 	limit int,
 ) (int, error) {
 	return 0, nil
+}
+
+func (m *mockBroker) Dlq(
+	ctx context.Context,
+	jobID string,
+	leaseToken string,
+) error {
+	return nil
 }
