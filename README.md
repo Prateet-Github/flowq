@@ -10,6 +10,8 @@ A Redis backed job queue written in Go.
 - Lease renewal and acknowledgement
 - Graceful shutdown
 - Redis backed persistence
+- Retries
+- Dead Letter Queue
 
 ## Stack
 
