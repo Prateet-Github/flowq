@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 type Broker interface {
@@ -12,6 +13,8 @@ type Broker interface {
 	RecoverExpired(ctx context.Context) (int, error)
 	RenewLease(ctx context.Context, jobID, leaseToken string) error
 	ReleaseLease(ctx context.Context, jobID, leaseToken string) error
+	ScheduleRetry(ctx context.Context, job *Job, delay time.Duration) error
+	PromoteRetries(ctx context.Context, limit int) (int, error)
 }
 
 type Client struct {

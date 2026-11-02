@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 type mockBroker struct {
@@ -62,4 +63,19 @@ func TestClientEnqueue(t *testing.T) {
 			t.Fatal("expected error for nil job")
 		}
 	})
+}
+
+func (m *mockBroker) ScheduleRetry(
+	ctx context.Context,
+	job *Job,
+	delay time.Duration,
+) error {
+	return nil
+}
+
+func (m *mockBroker) PromoteRetries(
+	ctx context.Context,
+	limit int,
+) (int, error) {
+	return 0, nil
 }

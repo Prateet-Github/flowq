@@ -29,12 +29,20 @@ var renewLua string
 //go:embed scripts/release.lua
 var releaseLua string
 
+//go:embed scripts/retry.lua
+var retryLua string
+
+//go:embed scripts/promote_retries.lua
+var promoteRetriesLua string
+
 var (
-	dequeueScript = redis.NewScript(dequeueLua)
-	ackScript     = redis.NewScript(ackLua)
-	recoverScript = redis.NewScript(recoverLua)
-	renewScript   = redis.NewScript(renewLua)
-	releaseScript = redis.NewScript(releaseLua)
+	dequeueScript        = redis.NewScript(dequeueLua)
+	ackScript            = redis.NewScript(ackLua)
+	recoverScript        = redis.NewScript(recoverLua)
+	renewScript          = redis.NewScript(renewLua)
+	releaseScript        = redis.NewScript(releaseLua)
+	retryScript          = redis.NewScript(retryLua)
+	promoteRetriesScript = redis.NewScript(promoteRetriesLua)
 )
 
 type RedisBroker struct {
@@ -182,4 +190,52 @@ func (b *RedisBroker) ReleaseLease(
 	}
 
 	return nil
+}
+
+func (b *RedisBroker) ScheduleRetry(
+	ctx context.Context,
+	job *queue.Job,
+	delay time.Duration,
+) error {
+	data, err := json.Marshal(job)
+	if err != nil {
+		return fmt.Errorf("marshal retry job: %w", err)
+	}
+
+	retryAt := time.Now().Add(delay).UnixMilli()
+
+	if err := retryScript.Run(
+		ctx,
+		b.client,
+		[]string{"{q}:delayed"},
+		job.ID,
+		data,
+		retryAt,
+	).Err(); err != nil {
+		return fmt.Errorf("schedule retry for job %s: %w", job.ID, err)
+	}
+
+	return nil
+}
+
+func (b *RedisBroker) PromoteRetries(
+	ctx context.Context,
+	limit int,
+) (int, error) {
+	if limit <= 0 {
+		return 0, fmt.Errorf("retry promotion limit must be positive")
+	}
+
+	result, err := promoteRetriesScript.Run(
+		ctx,
+		b.client,
+		[]string{"{q}:delayed"},
+		time.Now().UnixMilli(),
+		limit,
+	).Int()
+	if err != nil {
+		return 0, fmt.Errorf("promote due retries: %w", err)
+	}
+
+	return result, nil
 }

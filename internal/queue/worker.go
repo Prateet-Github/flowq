@@ -53,6 +53,11 @@ func (p *WorkerPool) Start(ctx context.Context) {
 					return
 				}
 
+				_, err := p.broker.PromoteRetries(ctx, 100)
+				if err != nil {
+					log.Printf("failed to promote delayed retries: %v", err)
+				}
+
 				job, err := p.broker.Dequeue(ctx, p.queueName)
 				if err != nil {
 					if ctx.Err() != nil {
@@ -149,12 +154,80 @@ func (p *WorkerPool) Start(ctx context.Context) {
 					switch {
 					case errors.Is(processErr, ErrNonRetryable):
 						log.Printf("job %s failed permanently: %v", job.ID, processErr)
+						continue
 
 					case errors.Is(processErr, ErrRetryable):
-						log.Printf("job %s failed with retryable error: %v", job.ID, processErr)
+						job.Attempts++
+
+						if job.Attempts > job.MaxRetry {
+							log.Printf(
+								"job %s exhausted retries after %d attempts: %v",
+								job.ID,
+								job.Attempts,
+								processErr,
+							)
+							continue
+						}
+
+						delay := RetryDelay(job.Attempts)
+
+						retryCtx, cancel := context.WithTimeout(
+							context.Background(),
+							5*time.Second,
+						)
+
+						err := p.broker.ScheduleRetry(retryCtx, job, delay)
+						cancel()
+
+						if err != nil {
+							log.Printf("failed to schedule retry for job %s: %v", job.ID, err)
+
+							releaseCtx, cancel := context.WithTimeout(
+								context.Background(),
+								5*time.Second,
+							)
+
+							if releaseErr := p.broker.ReleaseLease(
+								releaseCtx,
+								job.ID,
+								job.LeaseToken,
+							); releaseErr != nil {
+								log.Printf("failed to release job %s: %v", job.ID, releaseErr)
+							}
+
+							cancel()
+							continue
+						}
+
+						// Remove the currently active job after scheduling its retry.
+						ackCtx, cancel := context.WithTimeout(
+							context.Background(),
+							5*time.Second,
+						)
+
+						if err := p.broker.Ack(ackCtx, job.ID, job.LeaseToken); err != nil {
+							log.Printf("failed to acknowledge retried job %s: %v", job.ID, err)
+						}
+
+						cancel()
 
 					default:
 						log.Printf("job %s failed with unclassified error: %v", job.ID, processErr)
+
+						releaseCtx, cancel := context.WithTimeout(
+							context.Background(),
+							5*time.Second,
+						)
+
+						if err := p.broker.ReleaseLease(
+							releaseCtx,
+							job.ID,
+							job.LeaseToken,
+						); err != nil {
+							log.Printf("failed to release job %s: %v", job.ID, err)
+						}
+
+						cancel()
 					}
 
 					continue
