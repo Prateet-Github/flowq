@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Prateet-Github/flowq/internal/queue"
+	"github.com/Prateet-Github/flowq/internal/job"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -23,7 +23,7 @@ func BenchmarkRedisEnqueue(b *testing.B) {
 
 	redisBroker := NewRedisBroker(client)
 
-	job := queue.NewJob(
+	job := job.NewJob(
 		"benchmark",
 		[]byte(`{"message":"benchmark payload"}`),
 	)

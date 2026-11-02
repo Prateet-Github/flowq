@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Prateet-Github/flowq/internal/broker"
+	"github.com/Prateet-Github/flowq/internal/job"
 	"github.com/Prateet-Github/flowq/internal/queue"
 	"github.com/redis/go-redis/v9"
 )
@@ -31,7 +32,7 @@ func main() {
 	go queue.StartRecovery(ctx, redisBroker, 5*time.Second)
 
 	mux := queue.NewServeMux()
-	mux.Handle("send_email", queue.HandlerFunc(func(ctx context.Context, job *queue.Job) error {
+	mux.Handle("send_email", queue.HandlerFunc(func(ctx context.Context, job *job.Job) error {
 		log.Printf("Processing job %s: %s", job.ID, job.Type)
 		log.Printf("Payload: %s", job.Payload)
 

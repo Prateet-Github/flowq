@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Prateet-Github/flowq/internal/queue"
+	"github.com/Prateet-Github/flowq/internal/job"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
@@ -55,7 +55,7 @@ func NewRedisBroker(client *redis.Client) *RedisBroker {
 	}
 }
 
-func (b *RedisBroker) Enqueue(ctx context.Context, job *queue.Job) error {
+func (b *RedisBroker) Enqueue(ctx context.Context, job *job.Job) error {
 	data, err := json.Marshal(job)
 	if err != nil {
 		return fmt.Errorf("marshal job: %w", err)
@@ -70,7 +70,7 @@ func (b *RedisBroker) Enqueue(ctx context.Context, job *queue.Job) error {
 	return nil
 }
 
-func (b *RedisBroker) Dequeue(ctx context.Context, queueName string) (*queue.Job, error) {
+func (b *RedisBroker) Dequeue(ctx context.Context, queueName string) (*job.Job, error) {
 	pendingKey := fmt.Sprintf("{q}:pending:%s", queueName)
 	activeKey := "{q}:active"
 	jobPrefix := "{q}:job:"
@@ -93,7 +93,7 @@ func (b *RedisBroker) Dequeue(ctx context.Context, queueName string) (*queue.Job
 		return nil, fmt.Errorf("dequeue job: %w", err)
 	}
 
-	var job queue.Job
+	var job job.Job
 	if err := json.Unmarshal([]byte(result), &job); err != nil {
 		return nil, fmt.Errorf("unmarshal job: %w", err)
 	}
@@ -194,7 +194,7 @@ func (b *RedisBroker) ReleaseLease(
 
 func (b *RedisBroker) ScheduleRetry(
 	ctx context.Context,
-	job *queue.Job,
+	job *job.Job,
 	delay time.Duration,
 ) error {
 	data, err := json.Marshal(job)

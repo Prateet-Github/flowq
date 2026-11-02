@@ -4,13 +4,15 @@ import (
 	"context"
 	"log"
 	"time"
+
+	"github.com/Prateet-Github/flowq/internal/job"
 )
 
 func StartHeartbeat(
 	ctx context.Context,
 	cancel context.CancelFunc,
 	broker Broker,
-	job *Job,
+	job *job.Job,
 	interval time.Duration,
 ) func() {
 	stop := make(chan struct{})

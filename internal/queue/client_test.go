@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"errors"
+	"github.com/Prateet-Github/flowq/internal/job"
 	"testing"
 	"time"
 )
@@ -11,11 +12,11 @@ type mockBroker struct {
 	enqueueErr error
 }
 
-func (m *mockBroker) Enqueue(ctx context.Context, job *Job) error {
+func (m *mockBroker) Enqueue(ctx context.Context, job *job.Job) error {
 	return m.enqueueErr
 }
 
-func (m *mockBroker) Dequeue(ctx context.Context, queueName string) (*Job, error) {
+func (m *mockBroker) Dequeue(ctx context.Context, queueName string) (*job.Job, error) {
 	return nil, nil
 }
 
@@ -39,7 +40,7 @@ func TestClientEnqueue(t *testing.T) {
 	t.Run("successful enqueue", func(t *testing.T) {
 		client := NewClient(&mockBroker{})
 
-		err := client.Enqueue(context.Background(), NewJob("send_email", []byte(`{}`)))
+		err := client.Enqueue(context.Background(), job.NewJob("send_email", []byte(`{}`)))
 		if err != nil {
 			t.Fatalf("expected no error, got %v", err)
 		}
@@ -49,7 +50,7 @@ func TestClientEnqueue(t *testing.T) {
 		expectedErr := errors.New("redis unavailable")
 		client := NewClient(&mockBroker{enqueueErr: expectedErr})
 
-		err := client.Enqueue(context.Background(), NewJob("send_email", []byte(`{}`)))
+		err := client.Enqueue(context.Background(), job.NewJob("send_email", []byte(`{}`)))
 		if !errors.Is(err, expectedErr) {
 			t.Fatalf("expected %v, got %v", expectedErr, err)
 		}
@@ -67,7 +68,7 @@ func TestClientEnqueue(t *testing.T) {
 
 func (m *mockBroker) ScheduleRetry(
 	ctx context.Context,
-	job *Job,
+	job *job.Job,
 	delay time.Duration,
 ) error {
 	return nil

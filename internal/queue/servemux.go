@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"github.com/Prateet-Github/flowq/internal/job"
 )
 
 type ServeMux struct {
@@ -28,7 +29,7 @@ func (m *ServeMux) Handle(jobType string, handler Handler) {
 }
 
 // check the job type and call the appropriate handler
-func (m *ServeMux) Process(ctx context.Context, job *Job) (err error) {
+func (m *ServeMux) Process(ctx context.Context, job *job.Job) (err error) {
 	handler, ok := m.handlers[job.Type]
 	if !ok {
 		return fmt.Errorf("queue: no handler registered for job type %q", job.Type)

@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/Prateet-Github/flowq/internal/broker"
+	"github.com/Prateet-Github/flowq/internal/job"
 	"github.com/Prateet-Github/flowq/internal/queue"
 	"github.com/redis/go-redis/v9"
 )
@@ -20,7 +21,7 @@ func main() {
 	redisBroker := broker.NewRedisBroker(rdb)
 	client := queue.NewClient(redisBroker)
 
-	job := queue.NewJob("send_email", []byte(`{"to":"test@example.com"}`))
+	job := job.NewJob("send_email", []byte(`{"to":"test@example.com"}`))
 
 	if err := client.Enqueue(ctx, job); err != nil {
 		log.Fatal(err)

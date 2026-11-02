@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Prateet-Github/flowq/internal/queue"
+	"github.com/Prateet-Github/flowq/internal/job"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -51,7 +51,7 @@ func TestEnqueueDequeueAck(t *testing.T) {
 		broker.client.Del(ctx, pendingKey)
 	})
 
-	original := queue.NewJob("send_email", []byte(`{"to":"test@example.com"}`))
+	original := job.NewJob("send_email", []byte(`{"to":"test@example.com"}`))
 	original.Queue = queueName
 
 	if err := broker.Enqueue(ctx, original); err != nil {
@@ -119,7 +119,7 @@ func TestAckRejectsInvalidLeaseToken(t *testing.T) {
 		broker.client.Del(ctx, pendingKey)
 	})
 
-	job := queue.NewJob("send_email", []byte(`{}`))
+	job := job.NewJob("send_email", []byte(`{}`))
 	job.Queue = queueName
 
 	if err := broker.Enqueue(ctx, job); err != nil {
@@ -162,7 +162,7 @@ func TestRecoverExpired(t *testing.T) {
 		broker.client.Del(ctx, pendingKey)
 	})
 
-	job := queue.NewJob("send_email", []byte(`{}`))
+	job := job.NewJob("send_email", []byte(`{}`))
 	job.Queue = queueName
 
 	if err := broker.Enqueue(ctx, job); err != nil {
@@ -232,7 +232,7 @@ func TestReleaseLease(t *testing.T) {
 		broker.client.Del(ctx, pendingKey)
 	})
 
-	job := queue.NewJob("send_email", []byte(`{}`))
+	job := job.NewJob("send_email", []byte(`{}`))
 	job.Queue = queueName
 
 	if err := broker.Enqueue(ctx, job); err != nil {
@@ -286,7 +286,7 @@ func TestRenewLease(t *testing.T) {
 		broker.client.Del(ctx, pendingKey)
 	})
 
-	job := queue.NewJob("send_email", []byte(`{}`))
+	job := job.NewJob("send_email", []byte(`{}`))
 	job.Queue = queueName
 
 	if err := broker.Enqueue(ctx, job); err != nil {
