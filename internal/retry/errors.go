@@ -1,4 +1,4 @@
-package queue
+package retry
 
 import "errors"
 

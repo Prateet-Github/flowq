@@ -7,6 +7,7 @@ import (
 
 	"github.com/Prateet-Github/flowq/internal/handler"
 	"github.com/Prateet-Github/flowq/internal/queue"
+	"github.com/Prateet-Github/flowq/internal/retry"
 
 	"log"
 	"sync"
@@ -156,11 +157,11 @@ func (p *WorkerPool) Start(ctx context.Context) {
 
 				if processErr != nil {
 					switch {
-					case errors.Is(processErr, queue.ErrNonRetryable):
+					case errors.Is(processErr, retry.ErrNonRetryable):
 						log.Printf("job %s failed permanently: %v", job.ID, processErr)
 						continue
 
-					case errors.Is(processErr, queue.ErrRetryable):
+					case errors.Is(processErr, retry.ErrRetryable):
 						job.Attempts++
 
 						if job.Attempts > job.MaxRetry {
@@ -173,7 +174,7 @@ func (p *WorkerPool) Start(ctx context.Context) {
 							continue
 						}
 
-						delay := queue.RetryDelay(job.Attempts)
+						delay := retry.RetryDelay(job.Attempts)
 
 						retryCtx, cancel := context.WithTimeout(
 							context.Background(),
