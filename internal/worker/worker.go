@@ -159,6 +159,17 @@ func (p *WorkerPool) Start(ctx context.Context) {
 					switch {
 					case errors.Is(processErr, retry.ErrNonRetryable):
 						log.Printf("job %s failed permanently: %v", job.ID, processErr)
+
+						dlqCtx, cancel := context.WithTimeout(
+							context.Background(),
+							5*time.Second,
+						)
+
+						if err := p.broker.Dlq(dlqCtx, job.ID, job.LeaseToken); err != nil {
+							log.Printf("failed to move job %s to DLQ: %v", job.ID, err)
+						}
+
+						cancel()
 						continue
 
 					case errors.Is(processErr, retry.ErrRetryable):
@@ -171,6 +182,17 @@ func (p *WorkerPool) Start(ctx context.Context) {
 								job.Attempts,
 								processErr,
 							)
+
+							dlqCtx, cancel := context.WithTimeout(
+								context.Background(),
+								5*time.Second,
+							)
+
+							if err := p.broker.Dlq(dlqCtx, job.ID, job.LeaseToken); err != nil {
+								log.Printf("failed to move job %s to DLQ: %v", job.ID, err)
+							}
+
+							cancel()
 							continue
 						}
 
@@ -204,7 +226,7 @@ func (p *WorkerPool) Start(ctx context.Context) {
 							continue
 						}
 
-						// Remove the currently active job after scheduling its retry.
+						// Removing the currently active job after scheduling its retry
 						ackCtx, cancel := context.WithTimeout(
 							context.Background(),
 							5*time.Second,

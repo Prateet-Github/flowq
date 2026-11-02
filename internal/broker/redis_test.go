@@ -325,3 +325,132 @@ func TestRenewLease(t *testing.T) {
 		t.Fatalf("cleanup acknowledgement failed: %v", err)
 	}
 }
+
+func TestDlqMovesJobToDeadLetterQueue(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	queueName := "dlq-test-" + time.Now().Format("150405.000000000")
+	pendingKey := "{q}:pending:" + queueName
+	dlqKey := "{q}:dlq"
+	activeKey := "{q}:active"
+
+	job := job.NewJob("send_email", []byte(`{"to":"test@example.com"}`))
+	job.Queue = queueName
+
+	if err := broker.Enqueue(ctx, job); err != nil {
+		t.Fatalf("enqueue failed: %v", err)
+	}
+
+	dequeued, err := broker.Dequeue(ctx, queueName)
+	if err != nil {
+		t.Fatalf("dequeue failed: %v", err)
+	}
+	if dequeued == nil {
+		t.Fatal("expected a job, got nil")
+	}
+
+	if err := broker.Dlq(ctx, dequeued.ID, dequeued.LeaseToken); err != nil {
+		t.Fatalf("dead-letter failed: %v", err)
+	}
+
+	// Verify the job was added to the dead-letter queue.
+	dlqJobs, err := broker.client.LRange(ctx, dlqKey, 0, -1).Result()
+	if err != nil {
+		t.Fatalf("failed to inspect DLQ: %v", err)
+	}
+	if len(dlqJobs) != 1 {
+		t.Fatalf("expected 1 job in DLQ, got %d", len(dlqJobs))
+	}
+
+	var stored struct {
+		ID string `json:"ID"`
+	}
+
+	if err := json.Unmarshal([]byte(dlqJobs[0]), &stored); err != nil {
+		t.Fatalf("failed to decode dead-lettered job: %v", err)
+	}
+	if stored.ID != dequeued.ID {
+		t.Fatalf("expected DLQ job ID %s, got %s", dequeued.ID, stored.ID)
+	}
+
+	// Verify the job was removed from active storage and its job record.
+	activeExists, err := broker.client.ZScore(ctx, activeKey, dequeued.ID).Result()
+	if err == nil {
+		t.Fatalf("expected job to leave active set, got score %v", activeExists)
+	}
+	if err != redis.Nil {
+		t.Fatalf("failed checking active set: %v", err)
+	}
+
+	jobExists, err := broker.client.Exists(ctx, "{q}:job:"+dequeued.ID).Result()
+	if err != nil {
+		t.Fatalf("failed checking job record: %v", err)
+	}
+	if jobExists != 0 {
+		t.Fatal("expected dead-lettered job record to be removed")
+	}
+
+	t.Cleanup(func() {
+		broker.client.Del(ctx, pendingKey, dlqKey)
+	})
+}
+
+func TestDlqRejectsInvalidLeaseToken(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	queueName := "dlq-invalid-lease-" + time.Now().Format("150405.000000000")
+	pendingKey := "{q}:pending:" + queueName
+	dlqKey := "{q}:dlq"
+
+	job := job.NewJob("send_email", []byte(`{}`))
+	job.Queue = queueName
+
+	if err := broker.Enqueue(ctx, job); err != nil {
+		t.Fatalf("enqueue failed: %v", err)
+	}
+
+	dequeued, err := broker.Dequeue(ctx, queueName)
+	if err != nil {
+		t.Fatalf("dequeue failed: %v", err)
+	}
+	if dequeued == nil {
+		t.Fatal("expected a job, got nil")
+	}
+
+	err = broker.Dlq(ctx, dequeued.ID, "invalid-token")
+	if err == nil {
+		t.Fatal("expected dead-lettering with an invalid token to fail")
+	}
+
+	// The job should remain stored and active.
+	jobExists, err := broker.client.Exists(ctx, "{q}:job:"+dequeued.ID).Result()
+	if err != nil {
+		t.Fatalf("failed checking job record: %v", err)
+	}
+	if jobExists != 1 {
+		t.Fatal("expected job record to remain after invalid lease token")
+	}
+
+	activeExists, err := broker.client.ZScore(ctx, "{q}:active", dequeued.ID).Result()
+	if err != nil {
+		t.Fatalf("expected job to remain active, got error: %v", err)
+	}
+	_ = activeExists
+
+	dlqCount, err := broker.client.LLen(ctx, dlqKey).Result()
+	if err != nil {
+		t.Fatalf("failed checking DLQ: %v", err)
+	}
+	if dlqCount != 0 {
+		t.Fatalf("expected empty DLQ, got %d jobs", dlqCount)
+	}
+
+	// Clean up using the valid lease token.
+	if err := broker.Ack(ctx, dequeued.ID, dequeued.LeaseToken); err != nil {
+		t.Fatalf("cleanup acknowledgement failed: %v", err)
+	}
+
+	t.Cleanup(func() {
+		broker.client.Del(ctx, pendingKey, dlqKey)
+	})
+}
