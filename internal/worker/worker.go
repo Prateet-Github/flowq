@@ -5,6 +5,8 @@ import (
 
 	"errors"
 
+	"github.com/google/uuid"
+
 	"github.com/Prateet-Github/flowq/internal/handler"
 	"github.com/Prateet-Github/flowq/internal/queue"
 	"github.com/Prateet-Github/flowq/internal/retry"
@@ -16,6 +18,7 @@ import (
 
 type WorkerPool struct {
 	workers   int
+	workerID  string
 	mux       *handler.ServeMux
 	broker    queue.Broker
 	queueName string
@@ -29,6 +32,7 @@ func NewWorkerPool(workers int, broker queue.Broker, mux *handler.ServeMux, queu
 		broker:    broker,
 		mux:       mux,
 		queueName: queueName,
+		workerID:  uuid.NewString(),
 	}
 }
 
