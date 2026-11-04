@@ -38,15 +38,19 @@ var promoteRetriesLua string
 //go:embed scripts/dlq.lua
 var dlqLua string
 
+//go:embed scripts/worker_heartbeat.lua
+var workerHeartbeatLua string
+
 var (
-	dequeueScript        = redis.NewScript(dequeueLua)
-	ackScript            = redis.NewScript(ackLua)
-	recoverScript        = redis.NewScript(recoverLua)
-	renewScript          = redis.NewScript(renewLua)
-	releaseScript        = redis.NewScript(releaseLua)
-	retryScript          = redis.NewScript(retryLua)
-	promoteRetriesScript = redis.NewScript(promoteRetriesLua)
-	dlqScript            = redis.NewScript(dlqLua)
+	dequeueScript         = redis.NewScript(dequeueLua)
+	ackScript             = redis.NewScript(ackLua)
+	recoverScript         = redis.NewScript(recoverLua)
+	renewScript           = redis.NewScript(renewLua)
+	releaseScript         = redis.NewScript(releaseLua)
+	retryScript           = redis.NewScript(retryLua)
+	promoteRetriesScript  = redis.NewScript(promoteRetriesLua)
+	dlqScript             = redis.NewScript(dlqLua)
+	workerHeartbeatScript = redis.NewScript(workerHeartbeatLua)
 )
 
 type RedisBroker struct {
@@ -284,6 +288,35 @@ func (b *RedisBroker) Dlq(
 			"cannot dead-letter job %s: lease expired or ownership lost",
 			jobID,
 		)
+	}
+
+	return nil
+}
+
+func (b *RedisBroker) HeartbeatWorker(
+	ctx context.Context,
+	workerID string,
+	inFlight []string,
+	ttl time.Duration,
+) error {
+	data, err := json.Marshal(inFlight)
+	if err != nil {
+		return fmt.Errorf("marshal in-flight jobs: %w", err)
+	}
+
+	key := "{q}:worker:" + workerID
+
+	_, err = workerHeartbeatScript.Run(
+		ctx,
+		b.client,
+		[]string{key},
+		time.Now().UnixMilli(),
+		data,
+		int(ttl.Seconds()),
+	).Result()
+
+	if err != nil {
+		return fmt.Errorf("heartbeat worker %s: %w", workerID, err)
 	}
 
 	return nil

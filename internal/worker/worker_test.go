@@ -350,3 +350,12 @@ func TestWorkerReleasesLeaseWhenRetrySchedulingFails(t *testing.T) {
 		t.Fatal("expected job not to be acknowledged")
 	}
 }
+
+func (m *mockWorkerBroker) HeartbeatWorker(
+	ctx context.Context,
+	workerID string,
+	inFlight []string,
+	ttl time.Duration,
+) error {
+	return nil
+}

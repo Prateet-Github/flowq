@@ -37,6 +37,15 @@ func (m *mockBroker) ReleaseLease(ctx context.Context, jobID, leaseToken string)
 	return nil
 }
 
+func (m *mockBroker) HeartbeatWorker(
+	ctx context.Context,
+	workerID string,
+	inFlight []string,
+	ttl time.Duration,
+) error {
+	return nil
+}
+
 func TestClientEnqueue(t *testing.T) {
 	t.Run("successful enqueue", func(t *testing.T) {
 		client := NewClient(&mockBroker{})

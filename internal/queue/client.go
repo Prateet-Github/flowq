@@ -18,6 +18,12 @@ type Broker interface {
 	ScheduleRetry(ctx context.Context, job *job.Job, delay time.Duration) error
 	PromoteRetries(ctx context.Context, limit int) (int, error)
 	Dlq(ctx context.Context, jobID string, leaseToken string) error
+	HeartbeatWorker(
+		ctx context.Context,
+		workerID string,
+		inFlight []string,
+		ttl time.Duration,
+	) error
 }
 
 type Client struct {

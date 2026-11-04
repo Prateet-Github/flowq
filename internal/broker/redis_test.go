@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -554,5 +555,48 @@ func TestScheduleRetryRejectsInvalidLeaseToken(t *testing.T) {
 	}
 	if retryExists != 0 {
 		t.Fatal("expected no retry payload")
+	}
+}
+
+func TestHeartbeatWorker(t *testing.T) {
+	broker, _ := setupRedisBroker(t)
+	ctx := context.Background()
+
+	workerID := "test-worker-1"
+	inFlight := []string{"job-1", "job-2"}
+	ttl := 10 * time.Second
+
+	err := broker.HeartbeatWorker(ctx, workerID, inFlight, ttl)
+	if err != nil {
+		t.Fatalf("heartbeat worker: %v", err)
+	}
+
+	key := "{q}:worker:" + workerID
+
+	data, err := broker.client.HGetAll(ctx, key).Result()
+	if err != nil {
+		t.Fatalf("read worker heartbeat: %v", err)
+	}
+
+	if len(data) == 0 {
+		t.Fatal("expected worker heartbeat data")
+	}
+
+	var got []string
+	if err := json.Unmarshal([]byte(data["in_flight"]), &got); err != nil {
+		t.Fatalf("unmarshal in-flight jobs: %v", err)
+	}
+
+	if !reflect.DeepEqual(got, inFlight) {
+		t.Fatalf("expected in-flight jobs %v, got %v", inFlight, got)
+	}
+
+	remainingTTL, err := broker.client.TTL(ctx, key).Result()
+	if err != nil {
+		t.Fatalf("read worker TTL: %v", err)
+	}
+
+	if remainingTTL <= 0 {
+		t.Fatal("expected worker heartbeat to have a TTL")
 	}
 }
