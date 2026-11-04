@@ -208,15 +208,29 @@ func (b *RedisBroker) ScheduleRetry(
 
 	retryAt := time.Now().Add(delay).UnixMilli()
 
-	if err := retryScript.Run(
+	result, err := retryScript.Run(
 		ctx,
 		b.client,
-		[]string{"{q}:delayed"},
+		[]string{
+			"{q}:active",
+			"{q}:delayed",
+		},
 		job.ID,
+		"{q}:job:",
 		data,
+		job.LeaseToken,
 		retryAt,
-	).Err(); err != nil {
+	).Int()
+
+	if err != nil {
 		return fmt.Errorf("schedule retry for job %s: %w", job.ID, err)
+	}
+
+	if result == 0 {
+		return fmt.Errorf(
+			"cannot schedule retry for job %s: lease expired or ownership lost",
+			job.ID,
+		)
 	}
 
 	return nil
