@@ -600,3 +600,75 @@ func TestHeartbeatWorker(t *testing.T) {
 		t.Fatal("expected worker heartbeat to have a TTL")
 	}
 }
+
+func TestUnregisterWorker(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	workerID := "test-worker-cleanup"
+	key := "{q}:worker:" + workerID
+
+	err := broker.HeartbeatWorker(
+		ctx,
+		workerID,
+		[]string{"job-1"},
+		10*time.Second,
+	)
+	if err != nil {
+		t.Fatalf("create worker heartbeat: %v", err)
+	}
+
+	exists, err := broker.client.Exists(ctx, key).Result()
+	if err != nil {
+		t.Fatalf("check worker key: %v", err)
+	}
+	if exists != 1 {
+		t.Fatal("expected worker heartbeat key to exist")
+	}
+
+	if err := broker.UnregisterWorker(ctx, workerID); err != nil {
+		t.Fatalf("unregister worker: %v", err)
+	}
+
+	exists, err = broker.client.Exists(ctx, key).Result()
+	if err != nil {
+		t.Fatalf("check deleted worker key: %v", err)
+	}
+	if exists != 0 {
+		t.Fatal("expected worker heartbeat key to be deleted")
+	}
+}
+
+func TestWorkerHeartbeatExpires(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	workerID := "test-worker-expiry"
+	key := "{q}:worker:" + workerID
+
+	err := broker.HeartbeatWorker(
+		ctx,
+		workerID,
+		[]string{"job-1"},
+		2*time.Second,
+	)
+	if err != nil {
+		t.Fatalf("create worker heartbeat: %v", err)
+	}
+
+	exists, err := broker.client.Exists(ctx, key).Result()
+	if err != nil {
+		t.Fatalf("check worker key: %v", err)
+	}
+	if exists != 1 {
+		t.Fatal("expected worker heartbeat key to exist")
+	}
+
+	time.Sleep(2500 * time.Millisecond)
+
+	exists, err = broker.client.Exists(ctx, key).Result()
+	if err != nil {
+		t.Fatalf("check expired worker key: %v", err)
+	}
+	if exists != 0 {
+		t.Fatal("expected worker heartbeat key to expire")
+	}
+}
