@@ -359,3 +359,10 @@ func (m *mockWorkerBroker) HeartbeatWorker(
 ) error {
 	return nil
 }
+
+func (m *mockWorkerBroker) UnregisterWorker(
+	ctx context.Context,
+	workerID string,
+) error {
+	return nil
+}

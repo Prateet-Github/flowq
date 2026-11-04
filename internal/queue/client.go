@@ -24,6 +24,7 @@ type Broker interface {
 		inFlight []string,
 		ttl time.Duration,
 	) error
+	UnregisterWorker(ctx context.Context, workerID string) error
 }
 
 type Client struct {

@@ -321,3 +321,16 @@ func (b *RedisBroker) HeartbeatWorker(
 
 	return nil
 }
+
+func (b *RedisBroker) UnregisterWorker(
+	ctx context.Context,
+	workerID string,
+) error {
+	key := "{q}:worker:" + workerID
+
+	if err := b.client.Del(ctx, key).Err(); err != nil {
+		return fmt.Errorf("unregister worker %s: %w", workerID, err)
+	}
+
+	return nil
+}

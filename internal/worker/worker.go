@@ -100,6 +100,16 @@ func (p *WorkerPool) Start(ctx context.Context) {
 	defer func() {
 		cancelWorkerHeartbeat()
 		stopWorkerHeartbeat()
+
+		cleanupCtx, cancel := context.WithTimeout(
+			context.Background(),
+			5*time.Second,
+		)
+		defer cancel()
+
+		if err := p.broker.UnregisterWorker(cleanupCtx, p.workerID); err != nil {
+			log.Printf("failed to unregister worker %s: %v", p.workerID, err)
+		}
 	}()
 
 	for i := 0; i < p.workers; i++ {

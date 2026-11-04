@@ -98,3 +98,10 @@ func (m *mockBroker) Dlq(
 ) error {
 	return nil
 }
+
+func (m *mockBroker) UnregisterWorker(
+	ctx context.Context,
+	workerID string,
+) error {
+	return nil
+}
