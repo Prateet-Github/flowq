@@ -17,11 +17,13 @@ import (
 )
 
 type WorkerPool struct {
-	workers   int
-	workerID  string
-	mux       *handler.ServeMux
-	broker    queue.Broker
-	queueName string
+	workers    int
+	workerID   string
+	mux        *handler.ServeMux
+	broker     queue.Broker
+	queueName  string
+	inFlightMu sync.Mutex
+	inFlight   map[string]struct{}
 }
 
 const ShutdownTimeout = 30 * time.Second
@@ -33,6 +35,7 @@ func NewWorkerPool(workers int, broker queue.Broker, mux *handler.ServeMux, queu
 		mux:       mux,
 		queueName: queueName,
 		workerID:  uuid.NewString(),
+		inFlight:  make(map[string]struct{}),
 	}
 }
 
@@ -48,12 +51,56 @@ func waitContext(ctx context.Context, duration time.Duration) bool {
 	}
 }
 
+func (p *WorkerPool) addInFlight(jobID string) {
+	p.inFlightMu.Lock()
+	defer p.inFlightMu.Unlock()
+
+	p.inFlight[jobID] = struct{}{}
+}
+
+func (p *WorkerPool) removeInFlight(jobID string) {
+	p.inFlightMu.Lock()
+	defer p.inFlightMu.Unlock()
+
+	delete(p.inFlight, jobID)
+}
+
+func (p *WorkerPool) inFlightJobs() []string {
+	p.inFlightMu.Lock()
+	defer p.inFlightMu.Unlock()
+
+	jobs := make([]string, 0, len(p.inFlight))
+	for jobID := range p.inFlight {
+		jobs = append(jobs, jobID)
+	}
+
+	return jobs
+}
+
 // start the worker pool then dequeue then process the job
+
 func (p *WorkerPool) Start(ctx context.Context) {
 	var wg sync.WaitGroup
 
 	shutdownCtx, cancelShutdown := context.WithCancel(context.Background())
 	defer cancelShutdown()
+
+	// Start one worker-level heartbeat for this WorkerPool.
+	workerHeartbeatCtx, cancelWorkerHeartbeat := context.WithCancel(context.Background())
+
+	stopWorkerHeartbeat := StartWorkerHeartbeat(
+		workerHeartbeatCtx,
+		p.broker,
+		p.workerID,
+		p.inFlightJobs,
+		5*time.Second,
+		15*time.Second,
+	)
+
+	defer func() {
+		cancelWorkerHeartbeat()
+		stopWorkerHeartbeat()
+	}()
 
 	for i := 0; i < p.workers; i++ {
 		wg.Go(func() {
@@ -87,6 +134,8 @@ func (p *WorkerPool) Start(ctx context.Context) {
 					continue
 				}
 
+				p.addInFlight(job.ID)
+
 				if ctx.Err() != nil {
 					releaseCtx, cancel := context.WithTimeout(
 						context.Background(),
@@ -102,6 +151,7 @@ func (p *WorkerPool) Start(ctx context.Context) {
 					}
 
 					cancel()
+					p.removeInFlight(job.ID)
 					return
 				}
 
@@ -139,6 +189,8 @@ func (p *WorkerPool) Start(ctx context.Context) {
 				stopHeartbeat()
 				cancelJob()
 
+				p.removeInFlight(job.ID)
+
 				if jobErr != nil {
 					log.Printf("job %s interrupted; releasing its lease", job.ID)
 
@@ -174,7 +226,6 @@ func (p *WorkerPool) Start(ctx context.Context) {
 						}
 
 						cancel()
-						continue
 
 					case errors.Is(processErr, retry.ErrRetryable):
 						job.Attempts++
@@ -227,20 +278,7 @@ func (p *WorkerPool) Start(ctx context.Context) {
 							}
 
 							cancel()
-							continue
 						}
-
-						// Removing the currently active job after scheduling its retry
-						ackCtx, cancel := context.WithTimeout(
-							context.Background(),
-							5*time.Second,
-						)
-
-						if err := p.broker.Ack(ackCtx, job.ID, job.LeaseToken); err != nil {
-							log.Printf("failed to acknowledge retried job %s: %v", job.ID, err)
-						}
-
-						cancel()
 
 					default:
 						log.Printf("job %s failed with unclassified error: %v", job.ID, processErr)

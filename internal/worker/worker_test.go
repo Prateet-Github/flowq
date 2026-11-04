@@ -266,8 +266,8 @@ func TestWorkerSchedulesRetryWithoutDLQ(t *testing.T) {
 	if !broker.retryCalled {
 		t.Fatal("expected ScheduleRetry to be called")
 	}
-	if !broker.ackCalled {
-		t.Fatal("expected worker to acknowledge the original job after scheduling retry")
+	if broker.ackCalled {
+		t.Fatal("expected worker not to acknowledge job separately after scheduling retry")
 	}
 	if broker.dlqCalled {
 		t.Fatal("expected job not to be moved to DLQ")

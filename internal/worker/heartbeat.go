@@ -46,3 +46,47 @@ func StartHeartbeat(
 		<-done
 	}
 }
+
+func StartWorkerHeartbeat(
+	ctx context.Context,
+	broker queue.Broker,
+	workerID string,
+	getInFlight func() []string,
+	interval time.Duration,
+	ttl time.Duration,
+) func() {
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		heartbeat := func() {
+			if err := broker.HeartbeatWorker(
+				ctx,
+				workerID,
+				getInFlight(),
+				ttl,
+			); err != nil {
+				log.Printf("worker heartbeat failed for %s: %v", workerID, err)
+			}
+		}
+
+		heartbeat()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				heartbeat()
+			}
+		}
+	}()
+
+	return func() {
+		<-done
+	}
+}
