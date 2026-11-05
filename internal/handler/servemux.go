@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+
 	"github.com/Prateet-Github/flowq/internal/job"
 )
 
@@ -32,7 +33,11 @@ func (m *ServeMux) Handle(jobType string, handler Handler) {
 func (m *ServeMux) Process(ctx context.Context, job *job.Job) (err error) {
 	handler, ok := m.handlers[job.Type]
 	if !ok {
-		return fmt.Errorf("queue: no handler registered for job type %q", job.Type)
+		return fmt.Errorf(
+			"%w: no handler registered for job type %q",
+			ErrUnknownJobType,
+			job.Type,
+		)
 	}
 
 	defer func() {

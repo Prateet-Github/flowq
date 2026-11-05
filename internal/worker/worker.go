@@ -11,6 +11,7 @@ import (
 	"github.com/Prateet-Github/flowq/internal/queue"
 	"github.com/Prateet-Github/flowq/internal/retry"
 
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -201,8 +202,8 @@ func (p *WorkerPool) Start(ctx context.Context) {
 
 				p.removeInFlight(job.ID)
 
-				if jobErr != nil {
-					log.Printf("job %s interrupted; releasing its lease", job.ID)
+				if errors.Is(jobErr, context.Canceled) && shutdownCtx.Err() != nil {
+					log.Printf("job %s interrupted by shutdown; releasing its lease", job.ID)
 
 					releaseCtx, cancel := context.WithTimeout(
 						context.Background(),
@@ -221,6 +222,14 @@ func (p *WorkerPool) Start(ctx context.Context) {
 					continue
 				}
 
+				if errors.Is(jobErr, context.DeadlineExceeded) {
+					processErr = fmt.Errorf(
+						"%w: job %s timed out: %v",
+						retry.ErrRetryable,
+						job.ID,
+						jobErr,
+					)
+				}
 				if processErr != nil {
 					switch {
 					case errors.Is(processErr, retry.ErrNonRetryable):
@@ -237,7 +246,21 @@ func (p *WorkerPool) Start(ctx context.Context) {
 
 						cancel()
 
-					case errors.Is(processErr, retry.ErrRetryable):
+					case errors.Is(processErr, handler.ErrUnknownJobType):
+						log.Printf("unknown job type; moving job %s to DLQ", job.ID)
+
+						dlqCtx, cancel := context.WithTimeout(
+							context.Background(),
+							5*time.Second,
+						)
+
+						if err := p.broker.Dlq(dlqCtx, job.ID, job.LeaseToken); err != nil {
+							log.Printf("failed to move job %s to DLQ: %v", job.ID, err)
+						}
+
+						cancel()
+
+					default:
 						job.Attempts++
 
 						if job.Attempts > job.MaxRetry {
@@ -289,24 +312,6 @@ func (p *WorkerPool) Start(ctx context.Context) {
 
 							cancel()
 						}
-
-					default:
-						log.Printf("job %s failed with unclassified error: %v", job.ID, processErr)
-
-						releaseCtx, cancel := context.WithTimeout(
-							context.Background(),
-							5*time.Second,
-						)
-
-						if err := p.broker.ReleaseLease(
-							releaseCtx,
-							job.ID,
-							job.LeaseToken,
-						); err != nil {
-							log.Printf("failed to release job %s: %v", job.ID, err)
-						}
-
-						cancel()
 					}
 
 					continue

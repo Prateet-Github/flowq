@@ -366,3 +366,246 @@ func (m *mockWorkerBroker) UnregisterWorker(
 ) error {
 	return nil
 }
+
+func TestWorkerRetriesUnclassifiedError(t *testing.T) {
+	testJob := job.NewJob("send_email", []byte(`{}`))
+	testJob.Queue = "default"
+	testJob.LeaseToken = "test-lease-token"
+	testJob.MaxRetry = 3
+
+	broker := &mockWorkerBroker{job: testJob}
+	mux := handler.NewServeMux()
+
+	mux.Handle("send_email", handler.HandlerFunc(func(
+		context.Context,
+		*job.Job,
+	) error {
+		return errors.New("unexpected handler failure")
+	}))
+
+	pool := NewWorkerPool(1, broker, mux, "default")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		pool.Start(ctx)
+	}()
+
+	deadline := time.After(2 * time.Second)
+
+	for {
+		broker.mu.Lock()
+		called := broker.retryCalled
+		broker.mu.Unlock()
+
+		if called {
+			break
+		}
+
+		select {
+		case <-deadline:
+			cancel()
+			<-done
+			t.Fatal("expected unclassified error to be retried")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	cancel()
+	<-done
+
+	broker.mu.Lock()
+	defer broker.mu.Unlock()
+
+	if !broker.retryCalled {
+		t.Fatal("expected ScheduleRetry to be called")
+	}
+	if broker.retryJob.Attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", broker.retryJob.Attempts)
+	}
+	if broker.dlqCalled || broker.ackCalled || broker.releaseCalled {
+		t.Fatal("unexpected DLQ, ACK, or lease release")
+	}
+}
+
+func TestWorkerRetriesHandlerPanic(t *testing.T) {
+	testJob := job.NewJob("send_email", []byte(`{}`))
+	testJob.Queue = "default"
+	testJob.LeaseToken = "test-lease-token"
+	testJob.MaxRetry = 3
+
+	broker := &mockWorkerBroker{job: testJob}
+	mux := handler.NewServeMux()
+
+	mux.Handle("send_email", handler.HandlerFunc(func(
+		context.Context,
+		*job.Job,
+	) error {
+		panic("unexpected panic")
+	}))
+
+	pool := NewWorkerPool(1, broker, mux, "default")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		pool.Start(ctx)
+	}()
+
+	deadline := time.After(2 * time.Second)
+
+	for {
+		broker.mu.Lock()
+		called := broker.retryCalled
+		broker.mu.Unlock()
+
+		if called {
+			break
+		}
+
+		select {
+		case <-deadline:
+			cancel()
+			<-done
+			t.Fatal("expected handler panic to trigger retry")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	cancel()
+	<-done
+
+	broker.mu.Lock()
+	defer broker.mu.Unlock()
+
+	if !broker.retryCalled {
+		t.Fatal("expected ScheduleRetry to be called")
+	}
+	if broker.retryJob.Attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", broker.retryJob.Attempts)
+	}
+	if broker.dlqCalled || broker.ackCalled || broker.releaseCalled {
+		t.Fatal("unexpected DLQ, ACK, or lease release")
+	}
+}
+
+func TestWorkerRetriesTimedOutJob(t *testing.T) {
+	testJob := job.NewJob("send_email", []byte(`{}`))
+	testJob.Queue = "default"
+	testJob.LeaseToken = "test-lease-token"
+	testJob.MaxRetry = 3
+	testJob.Timeout = 50 * time.Millisecond
+
+	broker := &mockWorkerBroker{job: testJob}
+	mux := handler.NewServeMux()
+
+	mux.Handle("send_email", handler.HandlerFunc(func(
+		ctx context.Context,
+		_ *job.Job,
+	) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}))
+
+	pool := NewWorkerPool(1, broker, mux, "default")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		pool.Start(ctx)
+	}()
+
+	deadline := time.After(2 * time.Second)
+
+	for {
+		broker.mu.Lock()
+		called := broker.retryCalled
+		broker.mu.Unlock()
+
+		if called {
+			break
+		}
+
+		select {
+		case <-deadline:
+			cancel()
+			<-done
+			t.Fatal("expected timed-out job to be retried")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	cancel()
+	<-done
+
+	broker.mu.Lock()
+	defer broker.mu.Unlock()
+
+	if !broker.retryCalled {
+		t.Fatal("expected ScheduleRetry to be called")
+	}
+	if broker.retryJob.Attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", broker.retryJob.Attempts)
+	}
+	if broker.dlqCalled || broker.ackCalled || broker.releaseCalled {
+		t.Fatal("unexpected DLQ, ACK, or lease release")
+	}
+}
+
+func TestWorkerMovesUnknownJobTypeToDLQ(t *testing.T) {
+	testJob := job.NewJob("unknown_type", []byte(`{}`))
+	testJob.Queue = "default"
+	testJob.LeaseToken = "test-lease-token"
+
+	broker := &mockWorkerBroker{job: testJob}
+	mux := handler.NewServeMux()
+
+	pool := NewWorkerPool(1, broker, mux, "default")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		pool.Start(ctx)
+	}()
+
+	deadline := time.After(2 * time.Second)
+
+	for {
+		broker.mu.Lock()
+		called := broker.dlqCalled
+		broker.mu.Unlock()
+
+		if called {
+			break
+		}
+
+		select {
+		case <-deadline:
+			cancel()
+			<-done
+			t.Fatal("expected unknown job type to be moved to DLQ")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	cancel()
+	<-done
+
+	broker.mu.Lock()
+	defer broker.mu.Unlock()
+
+	if !broker.dlqCalled {
+		t.Fatal("expected Dlq to be called")
+	}
+	if broker.retryCalled || broker.ackCalled || broker.releaseCalled {
+		t.Fatal("unexpected retry, ACK, or lease release")
+	}
+}

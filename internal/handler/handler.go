@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Prateet-Github/flowq/internal/job"
 )
@@ -9,6 +10,8 @@ import (
 type Handler interface {
 	Handle(ctx context.Context, job *job.Job) error
 }
+
+var ErrUnknownJobType = errors.New("unknown job type")
 
 // its the adapter that will convert plain go fns into types that satisfy handler interface
 type HandlerFunc func(ctx context.Context, job *job.Job) error
