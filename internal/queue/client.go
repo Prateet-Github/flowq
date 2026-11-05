@@ -25,6 +25,7 @@ type Broker interface {
 		ttl time.Duration,
 	) error
 	UnregisterWorker(ctx context.Context, workerID string) error
+	LeaseDuration() time.Duration
 }
 
 type Client struct {

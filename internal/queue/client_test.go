@@ -25,6 +25,10 @@ func (m *mockBroker) Ack(ctx context.Context, jobID, leaseToken string) error {
 	return nil
 }
 
+func (m *mockBroker) LeaseDuration() time.Duration {
+	return 30 * time.Second
+}
+
 func (m *mockBroker) RecoverExpired(ctx context.Context) (int, error) {
 	return 0, nil
 }

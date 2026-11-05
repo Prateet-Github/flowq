@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +11,9 @@ import (
 	"github.com/Prateet-Github/flowq/internal/handler"
 	"github.com/Prateet-Github/flowq/internal/job"
 	"github.com/Prateet-Github/flowq/internal/retry"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/Prateet-Github/flowq/internal/broker"
 )
 
 type mockWorkerBroker struct {
@@ -21,6 +25,7 @@ type mockWorkerBroker struct {
 	retryCalled      bool
 	retryJob         *job.Job
 	scheduleRetryErr error
+	renewCalls       int
 }
 
 func (m *mockWorkerBroker) Enqueue(context.Context, *job.Job) error {
@@ -47,11 +52,23 @@ func (m *mockWorkerBroker) Ack(context.Context, string, string) error {
 	return nil
 }
 
+func (m *mockWorkerBroker) LeaseDuration() time.Duration {
+	return 30 * time.Second
+}
+
 func (m *mockWorkerBroker) RecoverExpired(context.Context) (int, error) {
 	return 0, nil
 }
 
-func (m *mockWorkerBroker) RenewLease(context.Context, string, string) error {
+func (m *mockWorkerBroker) RenewLease(
+	context.Context,
+	string,
+	string,
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.renewCalls++
 	return nil
 }
 
@@ -608,4 +625,119 @@ func TestWorkerMovesUnknownJobTypeToDLQ(t *testing.T) {
 	if broker.retryCalled || broker.ackCalled || broker.releaseCalled {
 		t.Fatal("unexpected retry, ACK, or lease release")
 	}
+}
+
+func TestStartHeartbeatRenewsLease(t *testing.T) {
+	broker := &mockWorkerBroker{}
+	testJob := job.NewJob("send_email", []byte(`{}`))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	stop := StartHeartbeat(
+		ctx,
+		cancel,
+		broker,
+		testJob,
+		50*time.Millisecond,
+	)
+
+	time.Sleep(180 * time.Millisecond)
+	stop()
+
+	broker.mu.Lock()
+	calls := broker.renewCalls
+	broker.mu.Unlock()
+
+	if calls < 2 {
+		t.Fatalf("expected at least 2 lease renewals, got %d", calls)
+	}
+}
+
+func TestStartHeartbeatRenewsRedisLease(t *testing.T) {
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		10*time.Second,
+	)
+	defer cancel()
+
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+		DB:   15,
+	})
+	defer rdb.Close()
+
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		if os.Getenv("CI") == "true" {
+			t.Fatalf("Redis unavailable in CI: %v", err)
+		}
+		t.Skipf("Redis unavailable: %v", err)
+	}
+
+	if err := rdb.FlushDB(ctx).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	redisBroker := broker.NewRedisBroker(
+		rdb,
+		broker.WithLease(6*time.Second),
+	)
+
+	testJob := job.NewJob("heartbeat_test", []byte(`{}`))
+	testJob.Queue = "default"
+
+	if err := redisBroker.Enqueue(ctx, testJob); err != nil {
+		t.Fatal(err)
+	}
+
+	dequeuedJob, err := redisBroker.Dequeue(ctx, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dequeuedJob == nil {
+		t.Fatal("expected job to be dequeued")
+	}
+
+	initialScore, err := rdb.ZScore(
+		ctx,
+		"{q}:active",
+		dequeuedJob.ID,
+	).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stop := StartHeartbeat(
+		ctx,
+		cancel,
+		redisBroker,
+		dequeuedJob,
+		time.Second,
+	)
+	defer stop()
+
+	time.Sleep(1500 * time.Millisecond)
+
+	renewedScore, err := rdb.ZScore(
+		ctx,
+		"{q}:active",
+		dequeuedJob.ID,
+	).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if renewedScore <= initialScore {
+		t.Fatalf(
+			"expected lease expiry to increase: initial=%v renewed=%v",
+			initialScore,
+			renewedScore,
+		)
+	}
+
+	t.Logf(
+		"Lease successfully renewed: initial=%v renewed=%v",
+		initialScore,
+		renewedScore,
+	)
 }

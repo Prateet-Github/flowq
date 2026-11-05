@@ -185,12 +185,14 @@ func (p *WorkerPool) Start(ctx context.Context) {
 					}
 				}()
 
+				heartbeatInterval := p.broker.LeaseDuration() / 3
+
 				stopHeartbeat := StartHeartbeat(
 					jobCtx,
 					cancelJob,
 					p.broker,
 					job,
-					10*time.Second,
+					heartbeatInterval,
 				)
 
 				processErr := p.mux.Process(jobCtx, job)

@@ -55,12 +55,37 @@ var (
 
 type RedisBroker struct {
 	client *redis.Client
+	lease  time.Duration
 }
 
-func NewRedisBroker(client *redis.Client) *RedisBroker {
-	return &RedisBroker{
-		client: client,
+type RedisBrokerOption func(*RedisBroker)
+
+func WithLease(d time.Duration) RedisBrokerOption {
+	return func(b *RedisBroker) {
+		if d > 0 {
+			b.lease = d
+		}
 	}
+}
+
+func NewRedisBroker(
+	client *redis.Client,
+	opts ...RedisBrokerOption,
+) *RedisBroker {
+	b := &RedisBroker{
+		client: client,
+		lease:  30 * time.Second,
+	}
+
+	for _, opt := range opts {
+		opt(b)
+	}
+
+	return b
+}
+
+func (b *RedisBroker) LeaseDuration() time.Duration {
+	return b.lease
 }
 
 func (b *RedisBroker) Enqueue(ctx context.Context, job *job.Job) error {
@@ -82,7 +107,7 @@ func (b *RedisBroker) Dequeue(ctx context.Context, queueName string) (*job.Job, 
 	pendingKey := fmt.Sprintf("{q}:pending:%s", queueName)
 	activeKey := "{q}:active"
 	jobPrefix := "{q}:job:"
-	leaseUntil := time.Now().Add(30 * time.Second).UnixMilli()
+	leaseUntil := time.Now().Add(b.lease).UnixMilli()
 	leaseToken := uuid.NewString()
 
 	result, err := dequeueScript.Run(
@@ -148,7 +173,7 @@ func (b *RedisBroker) RecoverExpired(ctx context.Context) (int, error) {
 }
 
 func (b *RedisBroker) RenewLease(ctx context.Context, jobID, leaseToken string) error {
-	leaseUntil := time.Now().Add(30 * time.Second).UnixMilli()
+	leaseUntil := time.Now().Add(b.lease).UnixMilli()
 
 	result, err := renewScript.Run(
 		ctx,

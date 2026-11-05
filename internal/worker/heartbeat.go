@@ -19,6 +19,10 @@ func StartHeartbeat(
 	stop := make(chan struct{})
 	done := make(chan struct{})
 
+	if interval <= 0 {
+		panic("heartbeat interval must be positive")
+	}
+
 	go func() {
 		defer close(done)
 
@@ -56,6 +60,10 @@ func StartWorkerHeartbeat(
 	ttl time.Duration,
 ) func() {
 	done := make(chan struct{})
+
+	if interval <= 0 || ttl <= 0 {
+		panic("worker heartbeat interval and TTL must be positive")
+	}
 
 	go func() {
 		defer close(done)
