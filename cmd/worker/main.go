@@ -99,7 +99,7 @@ func main() {
 		log.Printf("Payload: %s", job.Payload)
 
 		select {
-		case <-time.After(30 * time.Second):
+		case <-time.After(5 * time.Second):
 			log.Printf("Finished job %s", job.ID)
 			return nil
 		case <-ctx.Done():
