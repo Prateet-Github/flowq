@@ -31,6 +31,10 @@ func main() {
 
 	redisBroker := broker.NewRedisBroker(rdb)
 
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		log.Fatalf("Redis connection failed: %v", err)
+	}
+
 	go worker.StartRecovery(ctx, redisBroker, 5*time.Second)
 
 	mux := handler.NewServeMux()

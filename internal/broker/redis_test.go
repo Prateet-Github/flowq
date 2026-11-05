@@ -193,6 +193,14 @@ func TestRecoverExpired(t *testing.T) {
 		t.Fatalf("expected at least 1 recovered job, got %d", recovered)
 	}
 
+	recoveredAgain, err := broker.RecoverExpired(ctx)
+	if err != nil {
+		t.Fatalf("second recovery failed: %v", err)
+	}
+	if recoveredAgain != 0 {
+		t.Fatalf("expected 0 jobs on second recovery, got %d", recoveredAgain)
+	}
+
 	pending, err := broker.client.LRange(ctx, pendingKey, 0, -1).Result()
 	if err != nil {
 		t.Fatalf("failed to inspect pending queue: %v", err)
@@ -213,12 +221,13 @@ func TestRecoverExpired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dequeue after recovery failed: %v", err)
 	}
+
 	if requeued == nil || requeued.ID != job.ID {
 		t.Fatalf("expected recovered job %s, got %+v", job.ID, requeued)
 	}
 
-	if err := broker.Ack(ctx, requeued.ID, requeued.LeaseToken); err != nil {
-		t.Fatalf("cleanup acknowledgement failed: %v", err)
+	if requeued.Attempts != 1 {
+		t.Fatalf("expected attempts to be 1 after recovery, got %d", requeued.Attempts)
 	}
 }
 

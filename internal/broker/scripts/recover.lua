@@ -1,10 +1,16 @@
+
 local active_key = KEYS[1]
 local job_prefix = ARGV[1]
 local now = tonumber(ARGV[2])
 
 local expired_jobs = redis.call(
-    "ZRANGEBYSCORE", active_key, "-inf", now,
-    "LIMIT", 0, 100
+    "ZRANGEBYSCORE",
+    active_key,
+    "-inf",
+    now,
+    "LIMIT",
+    0,
+    100
 )
 
 local recovered = 0
@@ -15,11 +21,22 @@ for _, job_id in ipairs(expired_jobs) do
 
     if job_data then
         local job = cjson.decode(job_data)
+
+        job.attempts = (job.attempts or 0) + 1
+
+        job.lease_token = nil
+
+        local updated_data = cjson.encode(job)
         local pending_key = "{q}:pending:" .. job.queue
 
-        redis.call("HSET", job_key, "state", "pending")
+        redis.call("HSET", job_key,
+            "data", updated_data,
+            "state", "pending"
+        )
+
         redis.call("HDEL", job_key, "lease_token")
-        redis.call("RPUSH", pending_key, job_data)
+
+        redis.call("RPUSH", pending_key, updated_data)
 
         recovered = recovered + 1
     end
