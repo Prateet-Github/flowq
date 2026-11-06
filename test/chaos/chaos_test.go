@@ -1,4 +1,5 @@
 //go:build chaos
+
 package chaos
 
 import (
