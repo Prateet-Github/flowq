@@ -1,3 +1,4 @@
+
 name: Go
 
 on:
@@ -41,6 +42,7 @@ jobs:
   chaos:
     runs-on: ubuntu-latest
     needs: build
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -51,4 +53,4 @@ jobs:
           cache: true
 
       - name: Run chaos test
-        run: go test -tags chaos -run TestChaos -v -timeout 10m ./test/chaos
+        run: make chaos

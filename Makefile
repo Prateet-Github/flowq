@@ -29,7 +29,7 @@ build:
 
 .PHONY: chaos
 chaos:
-	go test -tags chaos -run TestChaos -v -timeout 10m ./test/chaos
+	go test -count=1 -tags chaos -run TestChaos -v -timeout 10m ./test/chaos
 
 .PHONY: clean
 clean:
