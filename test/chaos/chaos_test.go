@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +34,45 @@ func runDocker(t *testing.T, args ...string) []byte {
 	}
 
 	return output
+}
+
+// Returns IDs of currently running worker containers.
+func runningWorkers(t *testing.T) []string {
+	t.Helper()
+
+	output := runDocker(
+		t,
+		"compose", "-f", composeFile,
+		"ps", "-q", "--status", "running", "worker",
+	)
+
+	return strings.Fields(string(output))
+}
+
+func killWorker(t *testing.T, workerID string) {
+	t.Helper()
+
+	log.Printf("SIGKILL worker %s", workerID)
+	runDocker(t, "kill", "--signal=KILL", workerID)
+}
+
+func startWorker(t *testing.T, workerID string) {
+	t.Helper()
+
+	log.Printf("Restarting worker %s", workerID)
+	runDocker(t, "start", workerID)
+}
+
+// Selects a running worker deterministically using the supplied RNG.
+func randomWorker(t *testing.T, rng *rand.Rand) string {
+	t.Helper()
+
+	workers := runningWorkers(t)
+	if len(workers) == 0 {
+		t.Fatal("no running worker containers found")
+	}
+
+	return workers[rng.Intn(len(workers))]
 }
 
 func enqueueJobs(t *testing.T, ctx context.Context, rdb *redis.Client) {
@@ -92,6 +133,29 @@ func assertEmpty(t *testing.T, key, dataType string, count int64) {
 	}
 }
 
+func scanKeys(
+	ctx context.Context,
+	rdb *redis.Client,
+	pattern string,
+) ([]string, error) {
+	var keys []string
+	var cursor uint64
+
+	for {
+		batch, nextCursor, err := rdb.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return nil, err
+		}
+
+		keys = append(keys, batch...)
+		cursor = nextCursor
+
+		if cursor == 0 {
+			return keys, nil
+		}
+	}
+}
+
 func assertQueueEmpty(t *testing.T, ctx context.Context, rdb *redis.Client) {
 	t.Helper()
 
@@ -119,7 +183,7 @@ func assertQueueEmpty(t *testing.T, ctx context.Context, rdb *redis.Client) {
 	}
 	assertEmpty(t, "{q}:dlq", "list", dlq)
 
-	jobKeys, err := rdb.Keys(ctx, "{q}:job:*").Result()
+	jobKeys, err := scanKeys(ctx, rdb, "{q}:job:*")
 	if err != nil {
 		t.Fatalf("scan job records: %v", err)
 	}
@@ -131,7 +195,7 @@ func assertQueueEmpty(t *testing.T, ctx context.Context, rdb *redis.Client) {
 		)
 	}
 
-	retryKeys, err := rdb.Keys(ctx, "{q}:retry:*").Result()
+	retryKeys, err := scanKeys(ctx, rdb, "{q}:retry:*")
 	if err != nil {
 		t.Fatalf("scan retry records: %v", err)
 	}
@@ -170,6 +234,64 @@ func reportDuplicates(t *testing.T, results map[string]string) {
 	)
 }
 
+func runRandomCrashes(
+	t *testing.T,
+	rng *rand.Rand,
+	duration time.Duration,
+) map[string]int {
+	t.Helper()
+
+	kills := make(map[string]int)
+	deadline := time.Now().Add(duration)
+
+	log.Printf("Starting random worker crashes for %s", duration)
+
+	for time.Now().Before(deadline) {
+		workerID := randomWorker(t, rng)
+
+		killWorker(t, workerID)
+		kills[workerID]++
+
+		// Restart the same worker after a deterministic random delay.
+		restartDelay := time.Duration(rng.Intn(2001)) * time.Millisecond
+		log.Printf("Worker %s restart delay: %s", workerID, restartDelay)
+
+		time.Sleep(restartDelay)
+		startWorker(t, workerID)
+
+		// Wait 1–3 seconds before the next crash.
+		crashInterval := time.Duration(rng.Intn(3)+1) * time.Second
+		log.Printf("Next worker crash in %s", crashInterval)
+
+		time.Sleep(crashInterval)
+	}
+
+	log.Printf("Random crash phase finished: %d kills", totalKills(kills))
+
+	return kills
+}
+
+func totalKills(kills map[string]int) int {
+	total := 0
+	for _, count := range kills {
+		total += count
+	}
+	return total
+}
+
+func ensureWorkersRunning(t *testing.T, compose func(...string) []byte) {
+	t.Helper()
+
+	compose("up", "-d", "--scale", "worker=3", "--wait")
+
+	workers := runningWorkers(t)
+	if len(workers) != 3 {
+		t.Fatalf("expected 3 running workers after recovery, got %d", len(workers))
+	}
+
+	log.Printf("All %d workers are running", len(workers))
+}
+
 func TestChaos(t *testing.T) {
 	seed := time.Now().UnixNano()
 
@@ -182,6 +304,8 @@ func TestChaos(t *testing.T) {
 	}
 
 	log.Printf("Chaos test seed: %d", seed)
+
+	rng := rand.New(rand.NewSource(seed))
 
 	compose := func(args ...string) []byte {
 		t.Helper()
@@ -240,7 +364,7 @@ func TestChaos(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
-		3*time.Minute,
+		5*time.Minute,
 	)
 	defer cancel()
 
@@ -260,7 +384,16 @@ func TestChaos(t *testing.T) {
 
 	log.Println("Redis DB 14 flushed")
 
+	// Enqueue jobs before introducing worker failures.
 	enqueueJobs(t, ctx, rdb)
+
+	// Randomly kill and restart workers while jobs are processing.
+	kills := runRandomCrashes(t, rng, 40*time.Second)
+
+	// Ensure all three workers are running again.
+	ensureWorkersRunning(t, compose)
+
+	// Wait for outstanding jobs and recovered leases.
 	waitForCompletion(t, ctx, rdb)
 
 	results, err := rdb.HGetAll(ctx, doneKey).Result()
@@ -282,4 +415,10 @@ func TestChaos(t *testing.T) {
 
 	assertQueueEmpty(t, ctx, rdb)
 	reportDuplicates(t, results)
+
+	log.Println("Worker kill report:")
+	for workerID, count := range kills {
+		log.Printf("Worker %s: killed %d times", workerID, count)
+	}
+	log.Printf("Total worker kills: %d", totalKills(kills))
 }
