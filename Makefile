@@ -27,6 +27,10 @@ bench:
 build:
 	go build -o bin/$(BINARY) ./cmd/flowq
 
+.PHONY: chaos
+chaos:
+	go test -tags chaos -run TestChaos -v -timeout 10m ./test/chaos
+
 .PHONY: clean
 clean:
 	rm -rf bin
