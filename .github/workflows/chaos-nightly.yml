@@ -1,0 +1,49 @@
+
+name: FlowQ Chaos Stress Test
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 20 * * *"
+
+jobs:
+  chaos-stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run 20 chaos iterations
+        run: |
+          mkdir -p chaos-logs
+
+          for i in {1..20}; do
+            echo "========== CHAOS RUN $i/20 =========="
+
+            if ! make chaos > "chaos-logs/run-$i.log" 2>&1; then
+              echo "FAILED: Run $i"
+              cat "chaos-logs/run-$i.log"
+              exit 1
+            fi
+
+            echo "PASSED: Run $i"
+            tail -n 8 "chaos-logs/run-$i.log"
+          done
+
+          echo "ALL 20 CHAOS RUNS PASSED"
+
+      - name: Upload chaos logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowq-chaos-logs
+          path: chaos-logs/
+          retention-days: 14
