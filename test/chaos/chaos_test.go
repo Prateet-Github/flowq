@@ -292,6 +292,30 @@ func ensureWorkersRunning(t *testing.T, compose func(...string) []byte) {
 	log.Printf("All %d workers are running", len(workers))
 }
 
+func terminateWorkerGracefully(t *testing.T, rng *rand.Rand) {
+	t.Helper()
+
+	workers := runningWorkers(t)
+	if len(workers) == 0 {
+		t.Fatal("no running workers available for SIGTERM test")
+	}
+
+	workerID := workers[rng.Intn(len(workers))]
+
+	log.Printf("Sending SIGTERM to worker %s", workerID)
+
+	runDocker(t, "kill", "--signal=TERM", workerID)
+
+	// Wait until the worker has exited.
+	runDocker(t, "wait", workerID)
+
+	log.Printf("Worker %s exited; restarting it", workerID)
+
+	runDocker(t, "start", workerID)
+
+	log.Printf("Worker %s restarted after graceful shutdown", workerID)
+}
+
 func TestChaos(t *testing.T) {
 	seed := time.Now().UnixNano()
 
@@ -389,6 +413,9 @@ func TestChaos(t *testing.T) {
 
 	// Randomly kill and restart workers while jobs are processing.
 	kills := runRandomCrashes(t, rng, 40*time.Second)
+
+	// Test graceful worker shutdown.
+	terminateWorkerGracefully(t, rng)
 
 	// Ensure all three workers are running again.
 	ensureWorkersRunning(t, compose)
