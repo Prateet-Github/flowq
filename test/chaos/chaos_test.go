@@ -22,6 +22,11 @@ const composeFile = "../../docker-compose.chaos.yml"
 const (
 	totalJobs = 10_000
 	doneKey   = "chaos:done"
+
+	initialJobPercent = 70
+	trickleBatches    = 10
+
+	leaseDuration = 3 * time.Second
 )
 
 func runDocker(t *testing.T, args ...string) []byte {
@@ -36,7 +41,6 @@ func runDocker(t *testing.T, args ...string) []byte {
 	return output
 }
 
-// Returns IDs of currently running worker containers.
 func runningWorkers(t *testing.T) []string {
 	t.Helper()
 
@@ -63,7 +67,6 @@ func startWorker(t *testing.T, workerID string) {
 	runDocker(t, "start", workerID)
 }
 
-// Selects a running worker deterministically using the supplied RNG.
 func randomWorker(t *testing.T, rng *rand.Rand) string {
 	t.Helper()
 
@@ -75,12 +78,17 @@ func randomWorker(t *testing.T, rng *rand.Rand) string {
 	return workers[rng.Intn(len(workers))]
 }
 
-func enqueueJobs(t *testing.T, ctx context.Context, rdb *redis.Client) {
+func enqueueJobsRange(
+	t *testing.T,
+	ctx context.Context,
+	rdb *redis.Client,
+	start, end int,
+) {
 	t.Helper()
 
 	redisBroker := broker.NewRedisBroker(rdb)
 
-	for i := 1; i <= totalJobs; i++ {
+	for i := start; i <= end; i++ {
 		j := job.NewJob("chaos_job", []byte(`{}`))
 		j.ID = fmt.Sprintf("chaos-%05d", i)
 		j.MaxRetry = 10
@@ -91,10 +99,16 @@ func enqueueJobs(t *testing.T, ctx context.Context, rdb *redis.Client) {
 		}
 	}
 
-	log.Printf("Enqueued %d chaos jobs", totalJobs)
+	if end >= start {
+		log.Printf("Enqueued jobs %d–%d", start, end)
+	}
 }
 
-func waitForCompletion(t *testing.T, ctx context.Context, rdb *redis.Client) {
+func waitForCompletion(
+	t *testing.T,
+	ctx context.Context,
+	rdb *redis.Client,
+) {
 	t.Helper()
 
 	deadline := time.NewTimer(90 * time.Second)
@@ -156,7 +170,11 @@ func scanKeys(
 	}
 }
 
-func assertQueueEmpty(t *testing.T, ctx context.Context, rdb *redis.Client) {
+func assertQueueEmpty(
+	t *testing.T,
+	ctx context.Context,
+	rdb *redis.Client,
+) {
 	t.Helper()
 
 	pending, err := rdb.LLen(ctx, "{q}:pending:default").Result()
@@ -234,43 +252,6 @@ func reportDuplicates(t *testing.T, results map[string]string) {
 	)
 }
 
-func runRandomCrashes(
-	t *testing.T,
-	rng *rand.Rand,
-	duration time.Duration,
-) map[string]int {
-	t.Helper()
-
-	kills := make(map[string]int)
-	deadline := time.Now().Add(duration)
-
-	log.Printf("Starting random worker crashes for %s", duration)
-
-	for time.Now().Before(deadline) {
-		workerID := randomWorker(t, rng)
-
-		killWorker(t, workerID)
-		kills[workerID]++
-
-		// Restart the same worker after a deterministic random delay.
-		restartDelay := time.Duration(rng.Intn(2001)) * time.Millisecond
-		log.Printf("Worker %s restart delay: %s", workerID, restartDelay)
-
-		time.Sleep(restartDelay)
-		startWorker(t, workerID)
-
-		// Wait 1–3 seconds before the next crash.
-		crashInterval := time.Duration(rng.Intn(3)+1) * time.Second
-		log.Printf("Next worker crash in %s", crashInterval)
-
-		time.Sleep(crashInterval)
-	}
-
-	log.Printf("Random crash phase finished: %d kills", totalKills(kills))
-
-	return kills
-}
-
 func totalKills(kills map[string]int) int {
 	total := 0
 	for _, count := range kills {
@@ -279,14 +260,79 @@ func totalKills(kills map[string]int) int {
 	return total
 }
 
-func ensureWorkersRunning(t *testing.T, compose func(...string) []byte) {
+// Runs random crashes while progressively enqueueing the remaining jobs.
+func runRandomCrashesWithTrickle(
+	t *testing.T,
+	ctx context.Context,
+	rdb *redis.Client,
+	rng *rand.Rand,
+	duration time.Duration,
+	nextJob int,
+) map[string]int {
+	t.Helper()
+
+	kills := make(map[string]int)
+	deadline := time.Now().Add(duration)
+
+	remainingJobs := totalJobs - nextJob + 1
+	batchSize := (remainingJobs + trickleBatches - 1) / trickleBatches
+
+	log.Printf("Starting random worker crashes for %s", duration)
+	log.Printf(
+		"Trickle enqueue: %d remaining jobs in batches of approximately %d",
+		remainingJobs,
+		batchSize,
+	)
+
+	for time.Now().Before(deadline) {
+		workerID := randomWorker(t, rng)
+
+		killWorker(t, workerID)
+		kills[workerID]++
+
+		restartDelay := time.Duration(rng.Intn(2001)) * time.Millisecond
+		log.Printf("Worker %s restart delay: %s", workerID, restartDelay)
+
+		time.Sleep(restartDelay)
+		startWorker(t, workerID)
+
+		// Enqueue another batch while chaos is ongoing.
+		if nextJob <= totalJobs {
+			endJob := min(nextJob+batchSize-1, totalJobs)
+
+			enqueueJobsRange(t, ctx, rdb, nextJob, endJob)
+			nextJob = endJob + 1
+		}
+
+		crashInterval := time.Duration(rng.Intn(3)+1) * time.Second
+		log.Printf("Next worker crash in %s", crashInterval)
+
+		time.Sleep(crashInterval)
+	}
+
+	// Ensure every remaining job is enqueued even if the crash window
+	// ended before all trickle batches were submitted.
+	if nextJob <= totalJobs {
+		log.Printf("Enqueueing remaining jobs after crash window")
+		enqueueJobsRange(t, ctx, rdb, nextJob, totalJobs)
+	}
+
+	log.Printf("Random crash phase finished: %d kills", totalKills(kills))
+
+	return kills
+}
+
+func ensureWorkersRunning(
+	t *testing.T,
+	compose func(...string) []byte,
+) {
 	t.Helper()
 
 	compose("up", "-d", "--scale", "worker=3", "--wait")
 
 	workers := runningWorkers(t)
 	if len(workers) != 3 {
-		t.Fatalf("expected 3 running workers after recovery, got %d", len(workers))
+		t.Fatalf("expected 3 running workers, got %d", len(workers))
 	}
 
 	log.Printf("All %d workers are running", len(workers))
@@ -303,17 +349,98 @@ func terminateWorkerGracefully(t *testing.T, rng *rand.Rand) {
 	workerID := workers[rng.Intn(len(workers))]
 
 	log.Printf("Sending SIGTERM to worker %s", workerID)
-
 	runDocker(t, "kill", "--signal=TERM", workerID)
 
-	// Wait until the worker has exited.
 	runDocker(t, "wait", workerID)
 
 	log.Printf("Worker %s exited; restarting it", workerID)
-
 	runDocker(t, "start", workerID)
+}
 
-	log.Printf("Worker %s restarted after graceful shutdown", workerID)
+// Pauses one worker beyond its configured lease duration.
+func pauseAndResumeWorker(
+	t *testing.T,
+	rng *rand.Rand,
+) {
+	t.Helper()
+
+	workerID := randomWorker(t, rng)
+
+	log.Printf("Pausing worker %s", workerID)
+	runDocker(t, "pause", workerID)
+
+	pauseDuration := leaseDuration + 2*time.Second
+	log.Printf("Keeping worker paused for %s", pauseDuration)
+	time.Sleep(pauseDuration)
+
+	log.Printf("Unpausing worker %s", workerID)
+	runDocker(t, "unpause", workerID)
+}
+
+// Stops all workers simultaneously, waits, and restarts the same containers.
+func killAllWorkersAndRestart(t *testing.T) {
+	t.Helper()
+
+	workers := runningWorkers(t)
+	if len(workers) != 3 {
+		t.Fatalf("expected 3 running workers before full shutdown, got %d", len(workers))
+	}
+
+	log.Printf("Killing all %d workers", len(workers))
+
+	for _, workerID := range workers {
+		killWorker(t, workerID)
+	}
+
+	log.Printf("All workers stopped; waiting 3 seconds")
+	time.Sleep(3 * time.Second)
+
+	for _, workerID := range workers {
+		startWorker(t, workerID)
+	}
+
+	log.Printf("All original worker containers restarted")
+
+	// Verify the original three workers are running again.
+	workers = runningWorkers(t)
+	if len(workers) != 3 {
+		t.Fatalf("expected 3 running workers after restart, got %d", len(workers))
+	}
+}
+
+// Waits for completion, allows leases to settle, and verifies Redis state.
+func finalizeChaosTest(
+	t *testing.T,
+	ctx context.Context,
+	rdb *redis.Client,
+) {
+	t.Helper()
+
+	waitForCompletion(t, ctx, rdb)
+
+	log.Printf("Verified %d completed job IDs", totalJobs)
+
+	log.Println("Waiting for leases and acknowledgements to settle")
+	time.Sleep(2 * leaseDuration)
+
+	results, err := rdb.HGetAll(ctx, doneKey).Result()
+	if err != nil {
+		t.Fatalf("read execution results: %v", err)
+	}
+
+	if len(results) != totalJobs {
+		t.Errorf("expected %d unique completed jobs, got %d", totalJobs, len(results))
+	}
+
+	for i := 1; i <= totalJobs; i++ {
+		id := fmt.Sprintf("chaos-%05d", i)
+		if _, exists := results[id]; !exists {
+			t.Errorf("job missing from chaos:done: %s", id)
+		}
+	}
+
+	assertQueueEmpty(t, ctx, rdb)
+	reportDuplicates(t, results)
 }
 
 func TestChaos(t *testing.T) {
@@ -408,44 +535,36 @@ func TestChaos(t *testing.T) {
 
 	log.Println("Redis DB 14 flushed")
 
-	// Enqueue jobs before introducing worker failures.
-	enqueueJobs(t, ctx, rdb)
+	// Enqueue the initial 70% of jobs.
+	initialJobs := totalJobs * initialJobPercent / 100
+	enqueueJobsRange(t, ctx, rdb, 1, initialJobs)
 
-	// Randomly kill and restart workers while jobs are processing.
-	kills := runRandomCrashes(t, rng, 40*time.Second)
+	// Random crashes with the remaining 30% enqueued in batches.
+	kills := runRandomCrashesWithTrickle(
+		t,
+		ctx,
+		rdb,
+		rng,
+		40*time.Second,
+		initialJobs+1,
+	)
 
-	// Test graceful worker shutdown.
+	// Graceful shutdown test.
 	terminateWorkerGracefully(t, rng)
-
-	// Ensure all three workers are running again.
 	ensureWorkersRunning(t, compose)
 
-	// Wait for outstanding jobs and recovered leases.
-	waitForCompletion(t, ctx, rdb)
+	// Pause/unpause test.
+	pauseAndResumeWorker(t, rng)
 
-	results, err := rdb.HGetAll(ctx, doneKey).Result()
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Full worker outage and recovery test.
+	killAllWorkersAndRestart(t)
 
-	for i := 1; i <= totalJobs; i++ {
-		id := fmt.Sprintf("chaos-%05d", i)
-		if _, exists := results[id]; !exists {
-			t.Errorf("job missing from chaos:done: %s", id)
-		}
-	}
-
-	log.Printf("Verified all %d job IDs", totalJobs)
-
-	log.Println("Waiting for leases and acknowledgements to settle")
-	time.Sleep(6 * time.Second)
-
-	assertQueueEmpty(t, ctx, rdb)
-	reportDuplicates(t, results)
+	// Final completion and Redis cleanup assertions.
+	finalizeChaosTest(t, ctx, rdb)
 
 	log.Println("Worker kill report:")
 	for workerID, count := range kills {
 		log.Printf("Worker %s: killed %d times", workerID, count)
 	}
-	log.Printf("Total worker kills: %d", totalKills(kills))
+	log.Printf("Total random worker kills: %d", totalKills(kills))
 }
