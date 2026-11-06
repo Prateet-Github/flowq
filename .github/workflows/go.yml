@@ -37,3 +37,18 @@ jobs:
 
       - name: Race tests
         run: go test -race ./...
+
+  chaos:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run chaos test
+        run: go test -tags chaos -run TestChaos -v -timeout 10m ./test/chaos
