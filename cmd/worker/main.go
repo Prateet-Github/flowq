@@ -5,51 +5,16 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/Prateet-Github/flowq/internal/broker"
+	"github.com/Prateet-Github/flowq/internal/config"
 	"github.com/Prateet-Github/flowq/internal/handler"
 	"github.com/Prateet-Github/flowq/internal/job"
 	"github.com/Prateet-Github/flowq/internal/worker"
 	"github.com/redis/go-redis/v9"
 )
-
-func getEnv(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
-}
-
-func getIntEnv(key string, fallback int) int {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-
-	n, err := strconv.Atoi(value)
-	if err != nil || n < 0 {
-		log.Fatalf("invalid %s: %q", key, value)
-	}
-
-	return n
-}
-
-func getDurationEnv(key string, fallback time.Duration) time.Duration {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-
-	d, err := time.ParseDuration(value)
-	if err != nil || d <= 0 {
-		log.Fatalf("invalid %s: %q", key, value)
-	}
-
-	return d
-}
 
 func main() {
 	ctx, stop := signal.NotifyContext(
@@ -59,36 +24,24 @@ func main() {
 	)
 	defer stop()
 
-	redisAddr := getEnv("REDIS_ADDR", "localhost:6379")
-	redisDB := getIntEnv("REDIS_DB", 0)
-	workers := getIntEnv("WORKERS", 10)
-	queueName := getEnv("QUEUE", "default")
-	lease := getDurationEnv("LEASE", 30*time.Second)
-	recoveryInterval := getDurationEnv(
-		"RECOVERY_INTERVAL",
-		5*time.Second,
-	)
-
-	if workers <= 0 {
-		log.Fatal("WORKERS must be greater than zero")
-	}
+	cfg := config.Load()
 
 	rdb := redis.NewClient(&redis.Options{
-		Addr: redisAddr,
-		DB:   redisDB,
+		Addr: cfg.RedisAddr,
+		DB:   cfg.RedisDB,
 	})
 	defer rdb.Close()
 
 	redisBroker := broker.NewRedisBroker(
 		rdb,
-		broker.WithLease(lease),
+		broker.WithLease(cfg.Lease),
 	)
 
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		log.Fatalf("Redis connection failed: %v", err)
 	}
 
-	go worker.StartRecovery(ctx, redisBroker, recoveryInterval)
+	go worker.StartRecovery(ctx, redisBroker, cfg.RecoveryInterval)
 
 	mux := handler.NewServeMux()
 	mux.Handle("send_email", handler.HandlerFunc(func(
@@ -108,20 +61,20 @@ func main() {
 	}))
 
 	pool := worker.NewWorkerPool(
-		workers,
+		cfg.Workers,
 		redisBroker,
 		mux,
-		queueName,
+		cfg.QueueName,
 	)
 
 	log.Printf(
 		"FlowQ worker started: Redis=%s DB=%d Workers=%d Queue=%s Lease=%s Recovery=%s",
-		redisAddr,
-		redisDB,
-		workers,
-		queueName,
-		lease,
-		recoveryInterval,
+		cfg.RedisAddr,
+		cfg.RedisDB,
+		cfg.Workers,
+		cfg.QueueName,
+		cfg.Lease,
+		cfg.RecoveryInterval,
 	)
 
 	pool.Start(ctx)
