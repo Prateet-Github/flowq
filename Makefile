@@ -1,4 +1,4 @@
-BINARY=flowq
+BINARY=bin
 
 .PHONY: all
 all: fmt vet test race
@@ -23,9 +23,13 @@ race:
 bench:
 	go test -bench=. -benchmem ./...
 
+BINARY_DIR = bin
+
 .PHONY: build
 build:
-	go build -o bin/$(BINARY) ./cmd/flowq
+	mkdir -p $(BINARY_DIR)
+	go build -o $(BINARY_DIR)/worker ./cmd/worker
+	go build -o $(BINARY_DIR)/producer ./cmd/producer
 
 .PHONY: chaos
 chaos:
