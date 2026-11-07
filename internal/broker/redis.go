@@ -88,13 +88,13 @@ func (b *RedisBroker) LeaseDuration() time.Duration {
 	return b.lease
 }
 
-func (b *RedisBroker) Enqueue(ctx context.Context, job *job.Job) error {
-	data, err := json.Marshal(job)
+func (b *RedisBroker) Enqueue(ctx context.Context, j *job.Job) error {
+	data, err := json.Marshal(j)
 	if err != nil {
 		return fmt.Errorf("marshal job: %w", err)
 	}
 
-	key := fmt.Sprintf("{q}:pending:%s", job.Queue)
+	key := fmt.Sprintf("{q}:pending:%s", j.Queue)
 
 	if err := b.client.RPush(ctx, key, data).Err(); err != nil {
 		return fmt.Errorf("enqueue job: %w", err)
@@ -126,14 +126,14 @@ func (b *RedisBroker) Dequeue(ctx context.Context, queueName string) (*job.Job, 
 		return nil, fmt.Errorf("dequeue job: %w", err)
 	}
 
-	var job job.Job
-	if err := json.Unmarshal([]byte(result), &job); err != nil {
+	var j job.Job
+	if err := json.Unmarshal([]byte(result), &j); err != nil {
 		return nil, fmt.Errorf("unmarshal job: %w", err)
 	}
 
-	job.LeaseToken = leaseToken
+	j.LeaseToken = leaseToken
 
-	return &job, nil
+	return &j, nil
 }
 
 func (b *RedisBroker) Ack(ctx context.Context, jobID, leaseToken string) error {
@@ -227,10 +227,10 @@ func (b *RedisBroker) ReleaseLease(
 
 func (b *RedisBroker) ScheduleRetry(
 	ctx context.Context,
-	job *job.Job,
+	j *job.Job,
 	delay time.Duration,
 ) error {
-	data, err := json.Marshal(job)
+	data, err := json.Marshal(j)
 	if err != nil {
 		return fmt.Errorf("marshal retry job: %w", err)
 	}
@@ -244,21 +244,21 @@ func (b *RedisBroker) ScheduleRetry(
 			"{q}:active",
 			"{q}:delayed",
 		},
-		job.ID,
+		j.ID,
 		"{q}:job:",
 		data,
-		job.LeaseToken,
+		j.LeaseToken,
 		retryAt,
 	).Int()
 
 	if err != nil {
-		return fmt.Errorf("schedule retry for job %s: %w", job.ID, err)
+		return fmt.Errorf("schedule retry for job %s: %w", j.ID, err)
 	}
 
 	if result == 0 {
 		return fmt.Errorf(
 			"cannot schedule retry for job %s: lease expired or ownership lost",
-			job.ID,
+			j.ID,
 		)
 	}
 

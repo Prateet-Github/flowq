@@ -18,7 +18,7 @@ import (
 
 type mockWorkerBroker struct {
 	mu               sync.Mutex
-	job              *job.Job
+	j                *job.Job
 	dlqCalled        bool
 	ackCalled        bool
 	releaseCalled    bool
@@ -36,12 +36,12 @@ func (m *mockWorkerBroker) Dequeue(context.Context, string) (*job.Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.job == nil {
+	if m.j == nil {
 		return nil, nil
 	}
 
-	j := m.job
-	m.job = nil
+	j := m.j
+	m.j = nil
 	return j, nil
 }
 
@@ -108,7 +108,7 @@ func TestWorkerMovesNonRetryableJobToDLQ(t *testing.T) {
 	testJob.Queue = "default"
 	testJob.LeaseToken = "test-lease-token"
 
-	broker := &mockWorkerBroker{job: testJob}
+	broker := &mockWorkerBroker{j: testJob}
 	mux := handler.NewServeMux()
 
 	mux.Handle("send_email", handler.HandlerFunc(func(
@@ -172,7 +172,7 @@ func TestWorkerMovesExhaustedRetriesToDLQ(t *testing.T) {
 	testJob.MaxRetry = 1
 	testJob.Attempts = 1
 
-	broker := &mockWorkerBroker{job: testJob}
+	broker := &mockWorkerBroker{j: testJob}
 	mux := handler.NewServeMux()
 
 	mux.Handle("send_email", handler.HandlerFunc(func(
@@ -235,7 +235,7 @@ func TestWorkerSchedulesRetryWithoutDLQ(t *testing.T) {
 	testJob.MaxRetry = 3
 	testJob.Attempts = 0
 
-	broker := &mockWorkerBroker{job: testJob}
+	broker := &mockWorkerBroker{j: testJob}
 	mux := handler.NewServeMux()
 
 	mux.Handle("send_email", handler.HandlerFunc(func(
@@ -307,7 +307,7 @@ func TestWorkerReleasesLeaseWhenRetrySchedulingFails(t *testing.T) {
 	testJob.MaxRetry = 3
 
 	broker := &mockWorkerBroker{
-		job:              testJob,
+		j:                testJob,
 		scheduleRetryErr: errors.New("Redis unavailable"),
 	}
 
@@ -390,7 +390,7 @@ func TestWorkerRetriesUnclassifiedError(t *testing.T) {
 	testJob.LeaseToken = "test-lease-token"
 	testJob.MaxRetry = 3
 
-	broker := &mockWorkerBroker{job: testJob}
+	broker := &mockWorkerBroker{j: testJob}
 	mux := handler.NewServeMux()
 
 	mux.Handle("send_email", handler.HandlerFunc(func(
@@ -453,7 +453,7 @@ func TestWorkerRetriesHandlerPanic(t *testing.T) {
 	testJob.LeaseToken = "test-lease-token"
 	testJob.MaxRetry = 3
 
-	broker := &mockWorkerBroker{job: testJob}
+	broker := &mockWorkerBroker{j: testJob}
 	mux := handler.NewServeMux()
 
 	mux.Handle("send_email", handler.HandlerFunc(func(
@@ -517,7 +517,7 @@ func TestWorkerRetriesTimedOutJob(t *testing.T) {
 	testJob.MaxRetry = 3
 	testJob.Timeout = 50 * time.Millisecond
 
-	broker := &mockWorkerBroker{job: testJob}
+	broker := &mockWorkerBroker{j: testJob}
 	mux := handler.NewServeMux()
 
 	mux.Handle("send_email", handler.HandlerFunc(func(
@@ -580,7 +580,7 @@ func TestWorkerMovesUnknownJobTypeToDLQ(t *testing.T) {
 	testJob.Queue = "default"
 	testJob.LeaseToken = "test-lease-token"
 
-	broker := &mockWorkerBroker{job: testJob}
+	broker := &mockWorkerBroker{j: testJob}
 	mux := handler.NewServeMux()
 
 	pool := NewWorkerPool(1, broker, mux, "default")

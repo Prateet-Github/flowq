@@ -46,14 +46,14 @@ func main() {
 	mux := handler.NewServeMux()
 	mux.Handle("send_email", handler.HandlerFunc(func(
 		ctx context.Context,
-		job *job.Job,
+		j *job.Job,
 	) error {
-		log.Printf("Processing job %s: %s", job.ID, job.Type)
-		log.Printf("Payload: %s", job.Payload)
+		log.Printf("Processing job %s: %s", j.ID, j.Type)
+		log.Printf("Payload: %s", j.Payload)
 
 		select {
 		case <-time.After(5 * time.Second):
-			log.Printf("Finished job %s", job.ID)
+			log.Printf("Finished job %s", j.ID)
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()

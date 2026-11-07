@@ -13,7 +13,7 @@ func StartHeartbeat(
 	ctx context.Context,
 	cancel context.CancelFunc,
 	broker queue.Broker,
-	job *job.Job,
+	j *job.Job,
 	interval time.Duration,
 ) func() {
 	stop := make(chan struct{})
@@ -36,8 +36,8 @@ func StartHeartbeat(
 			case <-stop:
 				return
 			case <-ticker.C:
-				if err := broker.RenewLease(ctx, job.ID, job.LeaseToken); err != nil {
-					log.Printf("heartbeat failed for job %s: %v", job.ID, err)
+				if err := broker.RenewLease(ctx, j.ID, j.LeaseToken); err != nil {
+					log.Printf("heartbeat failed for job %s: %v", j.ID, err)
 					cancel()
 					return
 				}

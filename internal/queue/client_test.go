@@ -13,7 +13,7 @@ type mockBroker struct {
 	enqueueErr error
 }
 
-func (m *mockBroker) Enqueue(ctx context.Context, job *job.Job) error {
+func (m *mockBroker) Enqueue(ctx context.Context, j *job.Job) error {
 	return m.enqueueErr
 }
 
@@ -82,7 +82,7 @@ func TestClientEnqueue(t *testing.T) {
 
 func (m *mockBroker) ScheduleRetry(
 	ctx context.Context,
-	job *job.Job,
+	j *job.Job,
 	delay time.Duration,
 ) error {
 	return nil
