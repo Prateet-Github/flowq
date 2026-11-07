@@ -1,0 +1,30 @@
+# Git
+.git
+.gitignore
+
+# Logs
+*.log
+logs/
+
+# Dependencies
+vendor/
+
+# Build outputs
+bin/
+dist/
+build/
+coverage/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+
+# Test artifacts
+*.test
+*.out
