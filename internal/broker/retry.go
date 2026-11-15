@@ -1,0 +1,75 @@
+package broker
+
+import (
+	"context"
+	_ "embed"
+
+	"encoding/json"
+
+	"fmt"
+	"time"
+
+	"github.com/Prateet-Github/flowq/internal/job"
+)
+
+func (b *RedisBroker) ScheduleRetry(
+	ctx context.Context,
+	j *job.Job,
+	delay time.Duration,
+) error {
+	data, err := json.Marshal(j)
+	if err != nil {
+		return fmt.Errorf("marshal retry job: %w", err)
+	}
+
+	retryAt := time.Now().Add(delay).UnixMilli()
+
+	result, err := retryScript.Run(
+		ctx,
+		b.client,
+		[]string{
+			"{q}:active",
+			"{q}:delayed",
+		},
+		j.ID,
+		"{q}:job:",
+		data,
+		j.LeaseToken,
+		retryAt,
+	).Int()
+
+	if err != nil {
+		return fmt.Errorf("schedule retry for job %s: %w", j.ID, err)
+	}
+
+	if result == 0 {
+		return fmt.Errorf(
+			"cannot schedule retry for job %s: lease expired or ownership lost",
+			j.ID,
+		)
+	}
+
+	return nil
+}
+
+func (b *RedisBroker) PromoteRetries(
+	ctx context.Context,
+	limit int,
+) (int, error) {
+	if limit <= 0 {
+		return 0, fmt.Errorf("retry promotion limit must be positive")
+	}
+
+	result, err := promoteRetriesScript.Run(
+		ctx,
+		b.client,
+		[]string{"{q}:delayed"},
+		time.Now().UnixMilli(),
+		limit,
+	).Int()
+	if err != nil {
+		return 0, fmt.Errorf("promote due retries: %w", err)
+	}
+
+	return result, nil
+}
