@@ -26,7 +26,7 @@ A Redis backed job queue written in Go.
 
 | Metric | Result |
 |---|---:|
-| Enqueue throughput | ~8,313 jobs/sec |
+| Enqueue throughput | ~9,396 jobs/sec |
 | Latency | ~120.25 µs/op |
 | Allocations | 11 allocs/op |
 
