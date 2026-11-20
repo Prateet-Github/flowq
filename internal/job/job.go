@@ -1,6 +1,8 @@
 package job
 
 import (
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,4 +29,24 @@ func NewJob(jobType string, payload []byte) *Job {
 		Attempts: 0,
 		Timeout:  30 * time.Second,
 	}
+}
+
+func (j *Job) Validate() error {
+	if j == nil {
+		return errors.New("job cannot be nil")
+	}
+
+	if strings.TrimSpace(j.ID) == "" {
+		return errors.New("job ID cannot be empty")
+	}
+
+	if strings.TrimSpace(j.Type) == "" {
+		return errors.New("job type cannot be empty")
+	}
+
+	if strings.TrimSpace(j.Queue) == "" {
+		return errors.New("job queue cannot be empty")
+	}
+
+	return nil
 }

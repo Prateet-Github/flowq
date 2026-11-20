@@ -2,7 +2,6 @@ package queue
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/Prateet-Github/flowq/internal/job"
@@ -39,8 +38,8 @@ func NewClient(b Broker) *Client {
 }
 
 func (c *Client) Enqueue(ctx context.Context, j *job.Job) error {
-	if j == nil {
-		return errors.New("job cannot be nil")
+	if err := j.Validate(); err != nil {
+		return err
 	}
 
 	return c.broker.Enqueue(ctx, j)

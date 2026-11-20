@@ -2,14 +2,17 @@ package broker
 
 import (
 	"context"
-	"fmt"
-
 	"encoding/json"
+	"fmt"
 
 	"github.com/Prateet-Github/flowq/internal/job"
 )
 
 func (b *RedisBroker) Enqueue(ctx context.Context, j *job.Job) error {
+	if err := j.Validate(); err != nil {
+		return err
+	}
+
 	data, err := json.Marshal(j)
 	if err != nil {
 		return fmt.Errorf("marshal job: %w", err)
