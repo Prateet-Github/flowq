@@ -83,7 +83,10 @@ func (b *RedisBroker) RecoverExpired(ctx context.Context) (int, error) {
 	result, err := recoverScript.Run(
 		ctx,
 		b.client,
-		[]string{"{q}:active"},
+		[]string{
+			"{q}:active",
+			"{q}:dlq",
+		},
 		"{q}:job:",
 		time.Now().UnixMilli(),
 	).Int()

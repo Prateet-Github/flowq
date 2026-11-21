@@ -1,5 +1,5 @@
-
 local active_key = KEYS[1]
+local dlq_key = KEYS[2]
 local job_prefix = ARGV[1]
 local now = tonumber(ARGV[2])
 
@@ -24,19 +24,31 @@ for _, job_id in ipairs(expired_jobs) do
 
         job.attempts = (job.attempts or 0) + 1
 
-        job.lease_token = nil
+        if job.attempts > (job.max_retry or 0) then
+            local updated_data = cjson.encode(job)
 
-        local updated_data = cjson.encode(job)
-        local pending_key = "{q}:pending:" .. job.queue
+            redis.call("RPUSH", dlq_key, updated_data)
+            redis.call("DEL", job_key)
+        else
+            local queue_name = job.queue
 
-        redis.call("HSET", job_key,
-            "data", updated_data,
-            "state", "pending"
-        )
+            if not queue_name or queue_name == "" then
+                queue_name = "default"
+            end
 
-        redis.call("HDEL", job_key, "lease_token")
+            job.queue = queue_name
 
-        redis.call("RPUSH", pending_key, updated_data)
+            local updated_data = cjson.encode(job)
+            local pending_key = "{q}:pending:" .. queue_name
+
+            redis.call("HSET", job_key,
+                "data", updated_data,
+                "state", "pending"
+            )
+
+            redis.call("HDEL", job_key, "lease_token")
+            redis.call("RPUSH", pending_key, updated_data)
+        end
 
         recovered = recovered + 1
     end

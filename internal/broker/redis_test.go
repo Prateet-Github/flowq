@@ -681,3 +681,121 @@ func TestWorkerHeartbeatExpires(t *testing.T) {
 		t.Fatal("expected worker heartbeat key to expire")
 	}
 }
+
+func TestRecoverExpiredMovesExhaustedJobToDLQ(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	j := job.NewJob("send_email", []byte(`{}`))
+	j.Queue = "recovery-dlq-test"
+	j.MaxRetry = 0
+
+	if err := broker.Enqueue(ctx, j); err != nil {
+		t.Fatalf("enqueue failed: %v", err)
+	}
+
+	dequeued, err := broker.Dequeue(ctx, j.Queue)
+	if err != nil {
+		t.Fatalf("dequeue failed: %v", err)
+	}
+	if dequeued == nil {
+		t.Fatal("expected a job")
+	}
+
+	if err := broker.client.ZAdd(ctx, "{q}:active", redis.Z{
+		Score:  float64(time.Now().Add(-time.Second).UnixMilli()),
+		Member: j.ID,
+	}).Err(); err != nil {
+		t.Fatalf("failed to expire lease: %v", err)
+	}
+
+	recovered, err := broker.RecoverExpired(ctx)
+	if err != nil {
+		t.Fatalf("recovery failed: %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("expected 1 recovered job, got %d", recovered)
+	}
+
+	dlqJobs, err := broker.client.LRange(ctx, "{q}:dlq", 0, -1).Result()
+	if err != nil {
+		t.Fatalf("failed to inspect DLQ: %v", err)
+	}
+	if len(dlqJobs) != 1 {
+		t.Fatalf("expected 1 job in DLQ, got %d", len(dlqJobs))
+	}
+
+	var stored job.Job
+	if err := json.Unmarshal([]byte(dlqJobs[0]), &stored); err != nil {
+		t.Fatalf("failed to decode DLQ job: %v", err)
+	}
+
+	if stored.ID != j.ID {
+		t.Fatalf("expected DLQ job %s, got %s", j.ID, stored.ID)
+	}
+	if stored.Attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", stored.Attempts)
+	}
+
+	exists, err := broker.client.Exists(ctx, "{q}:job:"+j.ID).Result()
+	if err != nil {
+		t.Fatalf("failed to check job record: %v", err)
+	}
+	if exists != 0 {
+		t.Fatal("expected exhausted job record to be deleted")
+	}
+
+	if _, err := broker.client.ZScore(ctx, "{q}:active", j.ID).Result(); err != redis.Nil {
+		t.Fatalf("expected job to leave active set, got %v", err)
+	}
+}
+
+func TestRecoverExpiredUsesDefaultQueueWhenMissing(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	jobID := "recovery-missing-queue-test"
+	jobKey := "{q}:job:" + jobID
+
+	data := `{"id":"recovery-missing-queue-test","type":"task","attempts":0,"max_retry":3}`
+
+	if err := broker.client.HSet(ctx, jobKey,
+		"data", data,
+		"state", "active",
+	).Err(); err != nil {
+		t.Fatalf("failed to create job record: %v", err)
+	}
+
+	if err := broker.client.ZAdd(ctx, "{q}:active", redis.Z{
+		Score:  float64(time.Now().Add(-time.Second).UnixMilli()),
+		Member: jobID,
+	}).Err(); err != nil {
+		t.Fatalf("failed to create expired lease: %v", err)
+	}
+
+	recovered, err := broker.RecoverExpired(ctx)
+	if err != nil {
+		t.Fatalf("recovery failed: %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("expected 1 recovered job, got %d", recovered)
+	}
+
+	pending, err := broker.client.LRange(ctx, "{q}:pending:default", 0, -1).Result()
+	if err != nil {
+		t.Fatalf("failed to inspect default queue: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 job in default queue, got %d", len(pending))
+	}
+
+	var stored job.Job
+	if err := json.Unmarshal([]byte(pending[0]), &stored); err != nil {
+		t.Fatalf("failed to decode recovered job: %v", err)
+	}
+
+	if stored.Queue == "" {
+		t.Fatal("expected recovered job to have a queue")
+	}
+	if stored.Attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", stored.Attempts)
+	}
+}
