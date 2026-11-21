@@ -799,3 +799,60 @@ func TestRecoverExpiredUsesDefaultQueueWhenMissing(t *testing.T) {
 		t.Fatalf("expected 1 attempt, got %d", stored.Attempts)
 	}
 }
+
+func TestRecoverExpiredPreservesLargeTimeout(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	j := job.NewJob("large-timeout-test", []byte(`{}`))
+	j.Queue = "large-timeout-test"
+	j.Timeout = 100000000000000 * time.Nanosecond
+
+	if err := broker.Enqueue(ctx, j); err != nil {
+		t.Fatalf("enqueue failed: %v", err)
+	}
+
+	dequeued, err := broker.Dequeue(ctx, j.Queue)
+	if err != nil {
+		t.Fatalf("dequeue failed: %v", err)
+	}
+	if dequeued == nil {
+		t.Fatal("expected a job")
+	}
+
+	if err := broker.client.ZAdd(ctx, "{q}:active", redis.Z{
+		Score:  float64(time.Now().Add(-time.Second).UnixMilli()),
+		Member: j.ID,
+	}).Err(); err != nil {
+		t.Fatalf("failed to expire lease: %v", err)
+	}
+
+	if _, err := broker.RecoverExpired(ctx); err != nil {
+		t.Fatalf("recovery failed: %v", err)
+	}
+
+	recoveredData, err := broker.client.LIndex(
+		ctx,
+		"{q}:pending:"+j.Queue,
+		0,
+	).Result()
+	if err != nil {
+		t.Fatalf("failed to read recovered job: %v", err)
+	}
+
+	var recovered job.Job
+	if err := json.Unmarshal([]byte(recoveredData), &recovered); err != nil {
+		t.Fatalf("failed to decode recovered job: %v", err)
+	}
+
+	if recovered.Timeout != j.Timeout {
+		t.Fatalf(
+			"timeout changed: expected %d, got %d",
+			j.Timeout,
+			recovered.Timeout,
+		)
+	}
+
+	if recovered.Attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", recovered.Attempts)
+	}
+}
