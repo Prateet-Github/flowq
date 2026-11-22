@@ -1,8 +1,14 @@
 local pending_key = KEYS[1]
 local active_key = KEYS[2]
 local job_prefix = ARGV[1]
-local lease_until = tonumber(ARGV[2])
+local lease_duration_ms = tonumber(ARGV[2])
 local lease_token = ARGV[3]
+
+local redis_time = redis.call("TIME")
+local now = tonumber(redis_time[1]) * 1000
+    + math.floor(tonumber(redis_time[2]) / 1000)
+
+local lease_until = now + lease_duration_ms
 
 local job_data = redis.call("LPOP", pending_key)
 

@@ -1,7 +1,10 @@
 local active_key = KEYS[1]
 local dlq_key = KEYS[2]
 local job_prefix = ARGV[1]
-local now = tonumber(ARGV[2])
+
+local redis_time = redis.call("TIME")
+local now = tonumber(redis_time[1]) * 1000
+    + math.floor(tonumber(redis_time[2]) / 1000)
 
 local expired_jobs = redis.call(
     "ZRANGEBYSCORE",
