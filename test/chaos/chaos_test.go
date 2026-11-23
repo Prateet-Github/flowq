@@ -590,6 +590,10 @@ func TestChaos(t *testing.T) {
 		initialJobs+1,
 	)
 
+	if totalKills(kills) == 0 {
+		t.Fatal("chaos test completed without killing any worker")
+	}
+
 	// Graceful shutdown test.
 	logChaosState(t, ctx, rdb, "SIGTERM")
 	terminateWorkerGracefully(t, rng)
