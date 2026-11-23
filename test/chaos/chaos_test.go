@@ -31,6 +31,45 @@ const (
 	leaseDuration = 3 * time.Second
 )
 
+func logChaosState(
+	t *testing.T,
+	ctx context.Context,
+	rdb *redis.Client,
+	phase string,
+) {
+	t.Helper()
+
+	pending, err := rdb.LLen(ctx, "{q}:pending:default").Result()
+	if err != nil {
+		t.Fatalf("read pending count before %s: %v", phase, err)
+	}
+
+	active, err := rdb.ZCard(ctx, "{q}:active").Result()
+	if err != nil {
+		t.Fatalf("read active count before %s: %v", phase, err)
+	}
+
+	done, err := rdb.HLen(ctx, doneKey).Result()
+	if err != nil {
+		t.Fatalf("read completed count before %s: %v", phase, err)
+	}
+
+	delayed, err := rdb.ZCard(ctx, "{q}:delayed").Result()
+	if err != nil {
+		t.Fatalf("read delayed count before %s: %v", phase, err)
+	}
+
+	log.Printf(
+		"Chaos state before %s: pending=%d active=%d delayed=%d done=%d in_flight=%d",
+		phase,
+		pending,
+		active,
+		delayed,
+		done,
+		pending+active+delayed,
+	)
+}
+
 func runDocker(t *testing.T, args ...string) []byte {
 	t.Helper()
 
@@ -522,7 +561,7 @@ func TestChaos(t *testing.T) {
 	defer cancel()
 
 	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
+		Addr: "localhost:6380",
 		DB:   14,
 	})
 	defer rdb.Close()
@@ -552,13 +591,16 @@ func TestChaos(t *testing.T) {
 	)
 
 	// Graceful shutdown test.
+	logChaosState(t, ctx, rdb, "SIGTERM")
 	terminateWorkerGracefully(t, rng)
 	ensureWorkersRunning(t, compose)
 
 	// Pause/unpause test.
+	logChaosState(t, ctx, rdb, "pause/unpause")
 	pauseAndResumeWorker(t, rng)
 
 	// Full worker outage and recovery test.
+	logChaosState(t, ctx, rdb, "kill-all")
 	killAllWorkersAndRestart(t)
 
 	// Final completion and Redis cleanup assertions.

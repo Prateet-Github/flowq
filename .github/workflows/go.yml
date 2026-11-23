@@ -1,4 +1,3 @@
-
 name: Go
 
 on:
@@ -35,6 +34,9 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+      - name: Vet including chaos tests
+        run: go vet -tags chaos ./...
 
       - name: Race tests
         run: go test -race ./...
