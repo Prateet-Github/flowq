@@ -1,24 +1,55 @@
 # FlowQ
 
-A Redis backed job queue written in Go.
+A Redis-backed job queue written in Go, built from scratch with Lua-powered atomic operations and lease-based job processing.
 
 ## Features
 
 - Concurrent worker pool
-- Atomic job claiming with Lua scripts
-- Lease based job recovery
-- Lease renewal and acknowledgement
-- Graceful shutdown
-- Redis backed persistence
-- Retries
-- Dead Letter Queue
+- Atomic job claiming using Redis Lua scripts
+- At-least-once job delivery
+- Lease-based job recovery after worker crashes
+- Automatic lease renewal
+- Lease ownership validation using unique tokens
+- Graceful worker shutdown
+- Configurable retry handling with exponential backoff and full jitter
+- Delayed retry scheduling
+- Dead Letter Queue (DLQ)
+- Panic recovery and job execution timeouts
+- Redis-backed job persistence
+- Chaos testing for worker failures and recovery
 
-## Stack
+## Architecture
 
-- Go
-- Redis
-- Lua
-- Docker
+```text
+Producer
+   |
+   v
+Queue Client
+   |
+   v
+Redis Broker
+   |
+   +---- Pending Jobs
+   |
+   +---- Active Jobs (Leases)
+   |
+   +---- Scheduled Jobs
+   |
+   +---- Dead Letter Queue
+             |
+             v
+       Worker Pool
+             |
+             v
+       Job Handlers
+```
+
+## Tech Stack
+
+- **Language:** Go
+- **Storage / Broker:** Redis
+- **Atomic Operations:** Lua
+- **Containerization:** Docker & Docker Compose
 
 ## Benchmark
 
@@ -30,10 +61,11 @@ A Redis backed job queue written in Go.
 | Latency | ~120.25 µs/op |
 | Allocations | 11 allocs/op |
 
-## Run
+*These are enqueue-only benchmark results, not end-to-end processing throughput.*
 
-```bash
-docker compose up -d redis
-go run ./cmd/worker
-go run ./cmd/producer
-```
+
+## Delivery Guarantee
+
+FlowQ provides **at-least-once delivery**.
+
+Jobs can be executed more than once if a worker crashes or loses its lease before acknowledging completion. Lease-based recovery makes unfinished jobs available for processing again.
