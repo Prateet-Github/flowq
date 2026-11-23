@@ -21,6 +21,7 @@ services:
       QUEUE: default
       LEASE: 3s
       RECOVERY_INTERVAL: 1s
+      CHAOS_SEED: ${CHAOS_SEED:?CHAOS_SEED must be set}
     depends_on:
       redis:
         condition: service_healthy

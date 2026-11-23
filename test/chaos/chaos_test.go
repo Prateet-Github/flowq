@@ -497,6 +497,8 @@ func TestChaos(t *testing.T) {
 
 	log.Printf("Chaos test seed: %d", seed)
 
+	t.Setenv("CHAOS_SEED", strconv.FormatInt(seed, 10))
+
 	rng := rand.New(rand.NewSource(seed))
 
 	compose := func(args ...string) []byte {
@@ -553,6 +555,9 @@ func TestChaos(t *testing.T) {
 		"--scale", "worker=3",
 		"--wait",
 	)
+
+	workerLogs := compose("logs", "--no-color", "--tail=20", "worker")
+	log.Printf("Chaos worker startup logs:\n%s", workerLogs)
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),

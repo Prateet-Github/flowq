@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"hash/fnv"
 	"log"
 	"math/rand"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -18,7 +20,28 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+func jobRNG(seed int64, jobID string) *rand.Rand {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(jobID))
+
+	jobSeed := seed ^ int64(h.Sum64())
+
+	return rand.New(rand.NewSource(jobSeed))
+}
+
 func main() {
+	seed := time.Now().UnixNano()
+
+	if value := os.Getenv("CHAOS_SEED"); value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			log.Fatalf("invalid CHAOS_SEED %q: %v", value, err)
+		}
+		seed = parsed
+	}
+
+	log.Printf("Chaos worker seed: %d", seed)
+
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,
@@ -58,8 +81,10 @@ func main() {
 		ctx context.Context,
 		j *job.Job,
 	) error {
-		// Random processing duration: 50–150ms.
-		delay := time.Duration(50+rand.Intn(101)) * time.Millisecond
+		rng := jobRNG(seed, j.ID)
+
+		// Deterministic processing duration: 50–150ms.
+		delay := time.Duration(50+rng.Intn(101)) * time.Millisecond
 
 		select {
 		case <-time.After(delay):
@@ -67,8 +92,8 @@ func main() {
 			return ctx.Err()
 		}
 
-		// Fail approximately 5% of first attempts.
-		if j.Attempts == 0 && rand.Intn(100) < 5 {
+		// Deterministic failure decision: approximately 5% of first attempts.
+		if j.Attempts == 0 && rng.Intn(100) < 5 {
 			return retry.ErrRetryable
 		}
 
