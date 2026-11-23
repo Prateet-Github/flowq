@@ -22,7 +22,12 @@ func (b *RedisBroker) ScheduleRetry(
 		return fmt.Errorf("marshal retry job: %w", err)
 	}
 
-	retryAt := time.Now().Add(delay).UnixMilli()
+	delayMs := delay / time.Millisecond
+	if delay%time.Millisecond > 0 {
+		delayMs++
+	} else if delay%time.Millisecond < 0 {
+		delayMs--
+	}
 
 	result, err := retryScript.Run(
 		ctx,
@@ -35,7 +40,7 @@ func (b *RedisBroker) ScheduleRetry(
 		"{q}:job:",
 		data,
 		j.LeaseToken,
-		retryAt,
+		delayMs,
 	).Int()
 
 	if err != nil {
@@ -64,9 +69,9 @@ func (b *RedisBroker) PromoteRetries(
 		ctx,
 		b.client,
 		[]string{"{q}:delayed"},
-		time.Now().UnixMilli(),
 		limit,
 	).Int()
+
 	if err != nil {
 		return 0, fmt.Errorf("promote due retries: %w", err)
 	}

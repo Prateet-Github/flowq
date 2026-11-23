@@ -5,7 +5,7 @@ local job_id = ARGV[1]
 local job_prefix = ARGV[2]
 local job_data = ARGV[3]
 local lease_token = ARGV[4]
-local retry_at = tonumber(ARGV[5])
+local delay_ms = tonumber(ARGV[5])
 
 local job_key = job_prefix .. job_id
 
@@ -20,6 +20,12 @@ local score = redis.call("ZSCORE", active_key, job_id)
 if not score then
     return 0
 end
+
+local redis_time = redis.call("TIME")
+local now = tonumber(redis_time[1]) * 1000
+    + math.floor(tonumber(redis_time[2]) / 1000)
+
+local retry_at = now + delay_ms
 
 redis.call("SET", "{q}:retry:" .. job_id, job_data)
 redis.call("ZADD", delayed_key, retry_at, job_id)

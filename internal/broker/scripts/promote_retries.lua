@@ -1,7 +1,9 @@
 local delayed_key = KEYS[1]
+local limit = tonumber(ARGV[1])
 
-local now = tonumber(ARGV[1])
-local limit = tonumber(ARGV[2])
+local redis_time = redis.call("TIME")
+local now = tonumber(redis_time[1]) * 1000
+    + math.floor(tonumber(redis_time[2]) / 1000)
 
 local due_jobs = redis.call(
     "ZRANGEBYSCORE",

@@ -663,7 +663,7 @@ func TestStartHeartbeatRenewsRedisLease(t *testing.T) {
 
 	rdb := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
-		DB:   15,
+		DB:   13,
 	})
 	defer rdb.Close()
 
