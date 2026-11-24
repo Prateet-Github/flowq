@@ -57,8 +57,8 @@ Redis Broker
 
 | Metric | Result |
 |---|---:|
-| Enqueue throughput | ~9,396 jobs/sec |
-| Latency | ~120.25 µs/op |
+| Enqueue throughput | ~8,159 jobs/sec |
+| Latency | ~120 µs/op |
 | Allocations | 11 allocs/op |
 
 *These are enqueue-only benchmark results, not end-to-end processing throughput.*
