@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"reflect"
 	"testing"
@@ -863,5 +864,212 @@ func TestRecoverExpiredPreservesLargeTimeout(t *testing.T) {
 
 	if recovered.Attempts != 1 {
 		t.Fatalf("expected 1 attempt, got %d", recovered.Attempts)
+	}
+}
+
+func TestPromoteRetriesMovesDueJobToPending(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	queueName := "promote-due"
+
+	j := job.NewJob("send_email", []byte(`{}`))
+	j.Queue = queueName
+
+	if err := broker.Enqueue(ctx, j); err != nil {
+		t.Fatalf("enqueue failed: %v", err)
+	}
+
+	dequeued, err := broker.Dequeue(ctx, queueName)
+	if err != nil {
+		t.Fatalf("dequeue failed: %v", err)
+	}
+	if dequeued == nil {
+		t.Fatal("expected a job")
+	}
+
+	if err := broker.ScheduleRetry(ctx, dequeued, 0); err != nil {
+		t.Fatalf("schedule retry failed: %v", err)
+	}
+
+	promoted, err := broker.PromoteRetries(ctx, 100)
+	if err != nil {
+		t.Fatalf("promote retries failed: %v", err)
+	}
+	if promoted != 1 {
+		t.Fatalf("expected 1 promoted job, got %d", promoted)
+	}
+
+	pending, err := broker.client.LRange(
+		ctx,
+		"{q}:pending:"+queueName,
+		0,
+		-1,
+	).Result()
+	if err != nil {
+		t.Fatalf("read pending queue: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 pending job, got %d", len(pending))
+	}
+
+	state, err := broker.client.HGet(
+		ctx,
+		"{q}:job:"+j.ID,
+		"state",
+	).Result()
+	if err != nil {
+		t.Fatalf("read job state: %v", err)
+	}
+	if state != "pending" {
+		t.Fatalf("expected state pending, got %q", state)
+	}
+
+	if _, err := broker.client.ZScore(
+		ctx,
+		"{q}:scheduled",
+		j.ID,
+	).Result(); err != redis.Nil {
+		t.Fatalf("expected job to be removed from scheduled set, got %v", err)
+	}
+}
+
+func TestPromoteRetriesKeepsFutureJobScheduled(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	queueName := "promote-future"
+
+	j := job.NewJob("send_email", []byte(`{}`))
+	j.Queue = queueName
+
+	if err := broker.Enqueue(ctx, j); err != nil {
+		t.Fatalf("enqueue failed: %v", err)
+	}
+
+	dequeued, err := broker.Dequeue(ctx, queueName)
+	if err != nil {
+		t.Fatalf("dequeue failed: %v", err)
+	}
+	if dequeued == nil {
+		t.Fatal("expected a job")
+	}
+
+	if err := broker.ScheduleRetry(ctx, dequeued, time.Hour); err != nil {
+		t.Fatalf("schedule retry failed: %v", err)
+	}
+
+	promoted, err := broker.PromoteRetries(ctx, 100)
+	if err != nil {
+		t.Fatalf("promote retries failed: %v", err)
+	}
+	if promoted != 0 {
+		t.Fatalf("expected 0 promoted jobs, got %d", promoted)
+	}
+
+	if _, err := broker.client.ZScore(
+		ctx,
+		"{q}:scheduled",
+		j.ID,
+	).Result(); err != nil {
+		t.Fatalf("expected job to remain scheduled: %v", err)
+	}
+}
+
+func TestPromoteRetriesRemovesStaleEntries(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	jobID := "missing-job"
+
+	if err := broker.client.ZAdd(
+		ctx,
+		"{q}:scheduled",
+		redis.Z{
+			Score:  0,
+			Member: jobID,
+		},
+	).Err(); err != nil {
+		t.Fatalf("add stale scheduled entry: %v", err)
+	}
+
+	promoted, err := broker.PromoteRetries(ctx, 100)
+	if err != nil {
+		t.Fatalf("promote retries failed: %v", err)
+	}
+	if promoted != 0 {
+		t.Fatalf("expected 0 promoted jobs, got %d", promoted)
+	}
+
+	if _, err := broker.client.ZScore(
+		ctx,
+		"{q}:scheduled",
+		jobID,
+	).Result(); err != redis.Nil {
+		t.Fatalf("expected stale entry to be removed, got %v", err)
+	}
+}
+
+func TestPromoteRetriesRespectsBatchLimit(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	const totalJobs = 3
+
+	for i := 0; i < totalJobs; i++ {
+		jobID := fmt.Sprintf("scheduled-job-%d", i)
+		jobKey := "{q}:job:" + jobID
+
+		j := job.NewJob("send_email", []byte(`{}`))
+		j.ID = jobID
+		j.Queue = "promote-batch"
+
+		data, err := json.Marshal(j)
+		if err != nil {
+			t.Fatalf("marshal job: %v", err)
+		}
+
+		if err := broker.client.HSet(
+			ctx,
+			jobKey,
+			"data", string(data),
+			"state", "scheduled",
+		).Err(); err != nil {
+			t.Fatalf("create job record: %v", err)
+		}
+
+		if err := broker.client.ZAdd(
+			ctx,
+			"{q}:scheduled",
+			redis.Z{
+				Score:  0,
+				Member: jobID,
+			},
+		).Err(); err != nil {
+			t.Fatalf("add scheduled job: %v", err)
+		}
+	}
+
+	promoted, err := broker.PromoteRetries(ctx, 2)
+	if err != nil {
+		t.Fatalf("promote retries failed: %v", err)
+	}
+	if promoted != 2 {
+		t.Fatalf("expected 2 promoted jobs, got %d", promoted)
+	}
+
+	remaining, err := broker.client.ZCard(ctx, "{q}:scheduled").Result()
+	if err != nil {
+		t.Fatalf("count scheduled jobs: %v", err)
+	}
+	if remaining != 1 {
+		t.Fatalf("expected 1 scheduled job remaining, got %d", remaining)
+	}
+
+	pending, err := broker.client.LLen(
+		ctx,
+		"{q}:pending:promote-batch",
+	).Result()
+	if err != nil {
+		t.Fatalf("count pending jobs: %v", err)
+	}
+	if pending != 2 {
+		t.Fatalf("expected 2 pending jobs, got %d", pending)
 	}
 }
