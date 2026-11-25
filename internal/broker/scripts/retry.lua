@@ -1,5 +1,5 @@
 local active_key = KEYS[1]
-local delayed_key = KEYS[2]
+local scheduled_key = KEYS[2]
 
 local job_id = ARGV[1]
 local job_prefix = ARGV[2]
@@ -25,11 +25,16 @@ local redis_time = redis.call("TIME")
 local now = tonumber(redis_time[1]) * 1000
     + math.floor(tonumber(redis_time[2]) / 1000)
 
-local retry_at = now + delay_ms
+local scheduled_at = now + delay_ms
 
-redis.call("SET", "{q}:retry:" .. job_id, job_data)
-redis.call("ZADD", delayed_key, retry_at, job_id)
+redis.call("HSET", job_key,
+    "data", job_data,
+    "state", "scheduled"
+)
+
+redis.call("HDEL", job_key, "lease_token")
+
+redis.call("ZADD", scheduled_key, scheduled_at, job_id)
 redis.call("ZREM", active_key, job_id)
-redis.call("DEL", job_key)
 
 return 1

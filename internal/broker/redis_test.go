@@ -478,44 +478,46 @@ func TestScheduleRetryAtomicallyRemovesActiveJob(t *testing.T) {
 		t.Fatalf("dequeue failed: %v", err)
 	}
 	if dequeued == nil {
-		t.Fatal("expected a job, got nil")
+		t.Fatal("expected a job")
 	}
 
-	delay := time.Minute
-
-	if err := broker.ScheduleRetry(ctx, dequeued, delay); err != nil {
+	if err := broker.ScheduleRetry(ctx, dequeued, time.Minute); err != nil {
 		t.Fatalf("schedule retry failed: %v", err)
 	}
 
-	retryData, err := broker.client.Get(ctx, "{q}:retry:"+dequeued.ID).Result()
+	jobKey := "{q}:job:" + dequeued.ID
+
+	data, err := broker.client.HGet(ctx, jobKey, "data").Result()
 	if err != nil {
-		t.Fatalf("expected retry payload to exist: %v", err)
+		t.Fatalf("expected job data to remain stored: %v", err)
 	}
 
-	var stored struct {
-		ID string `json:"ID"`
-	}
-	if err := json.Unmarshal([]byte(retryData), &stored); err != nil {
-		t.Fatalf("failed to decode retry payload: %v", err)
+	var stored job.Job
+	if err := json.Unmarshal([]byte(data), &stored); err != nil {
+		t.Fatalf("failed to decode scheduled job: %v", err)
 	}
 	if stored.ID != dequeued.ID {
-		t.Fatalf("expected retry job ID %s, got %s", dequeued.ID, stored.ID)
+		t.Fatalf("expected job ID %s, got %s", dequeued.ID, stored.ID)
 	}
 
-	if _, err := broker.client.ZScore(ctx, "{q}:delayed", dequeued.ID).Result(); err != nil {
-		t.Fatalf("expected job in delayed set: %v", err)
+	state, err := broker.client.HGet(ctx, jobKey, "state").Result()
+	if err != nil {
+		t.Fatalf("failed to read job state: %v", err)
+	}
+	if state != "scheduled" {
+		t.Fatalf("expected state scheduled, got %s", state)
+	}
+
+	if _, err := broker.client.HGet(ctx, jobKey, "lease_token").Result(); err != redis.Nil {
+		t.Fatalf("expected lease token to be removed, got %v", err)
+	}
+
+	if _, err := broker.client.ZScore(ctx, "{q}:scheduled", dequeued.ID).Result(); err != nil {
+		t.Fatalf("expected job in scheduled set: %v", err)
 	}
 
 	if _, err := broker.client.ZScore(ctx, "{q}:active", dequeued.ID).Result(); err != redis.Nil {
-		t.Fatalf("expected job to leave active set, got error: %v", err)
-	}
-
-	exists, err := broker.client.Exists(ctx, "{q}:job:"+dequeued.ID).Result()
-	if err != nil {
-		t.Fatalf("failed checking original job record: %v", err)
-	}
-	if exists != 0 {
-		t.Fatal("expected original job record to be deleted")
+		t.Fatalf("expected job to leave active set, got %v", err)
 	}
 }
 
@@ -536,7 +538,7 @@ func TestScheduleRetryRejectsInvalidLeaseToken(t *testing.T) {
 		t.Fatalf("dequeue failed: %v", err)
 	}
 	if dequeued == nil {
-		t.Fatal("expected a job, got nil")
+		t.Fatal("expected a job")
 	}
 
 	dequeued.LeaseToken = "invalid-token"
@@ -546,11 +548,18 @@ func TestScheduleRetryRejectsInvalidLeaseToken(t *testing.T) {
 		t.Fatal("expected retry scheduling with invalid token to fail")
 	}
 
-	if _, err := broker.client.ZScore(ctx, "{q}:active", dequeued.ID).Result(); err != nil {
+	if _, err := broker.client.ZScore(
+		ctx,
+		"{q}:active",
+		dequeued.ID,
+	).Result(); err != nil {
 		t.Fatalf("expected job to remain active: %v", err)
 	}
 
-	exists, err := broker.client.Exists(ctx, "{q}:job:"+dequeued.ID).Result()
+	exists, err := broker.client.Exists(
+		ctx,
+		"{q}:job:"+dequeued.ID,
+	).Result()
 	if err != nil {
 		t.Fatalf("failed checking job record: %v", err)
 	}
@@ -558,12 +567,12 @@ func TestScheduleRetryRejectsInvalidLeaseToken(t *testing.T) {
 		t.Fatal("expected original job record to remain")
 	}
 
-	retryExists, err := broker.client.Exists(ctx, "{q}:retry:"+dequeued.ID).Result()
-	if err != nil {
-		t.Fatalf("failed checking retry record: %v", err)
-	}
-	if retryExists != 0 {
-		t.Fatal("expected no retry payload")
+	if _, err := broker.client.ZScore(
+		ctx,
+		"{q}:scheduled",
+		dequeued.ID,
+	).Result(); err != redis.Nil {
+		t.Fatalf("expected job not to be scheduled: %v", err)
 	}
 }
 

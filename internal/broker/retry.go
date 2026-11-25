@@ -34,7 +34,7 @@ func (b *RedisBroker) ScheduleRetry(
 		b.client,
 		[]string{
 			"{q}:active",
-			"{q}:delayed",
+			"{q}:scheduled",
 		},
 		j.ID,
 		"{q}:job:",
@@ -68,7 +68,8 @@ func (b *RedisBroker) PromoteRetries(
 	result, err := promoteRetriesScript.Run(
 		ctx,
 		b.client,
-		[]string{"{q}:delayed"},
+		[]string{"{q}:scheduled"},
+		"{q}:job:",
 		limit,
 	).Int()
 
