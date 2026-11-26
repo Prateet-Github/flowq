@@ -1073,3 +1073,142 @@ func TestPromoteScheduledRespectsBatchLimit(t *testing.T) {
 		t.Fatalf("expected 2 pending jobs, got %d", pending)
 	}
 }
+
+func TestConcurrentPromoteScheduledDoesNotDuplicateJobs(t *testing.T) {
+	broker1, ctx := setupRedisBroker(t)
+
+	// Simulate a second FlowQ instance with its own Redis client.
+	client2 := redis.NewClient(&redis.Options{
+		Addr: "127.0.0.1:6379",
+		DB:   15,
+	})
+	defer client2.Close()
+
+	if err := client2.Ping(ctx).Err(); err != nil {
+		t.Fatalf("second Redis client ping failed: %v", err)
+	}
+
+	broker2 := NewRedisBroker(client2)
+
+	const totalJobs = 100
+	const queueName = "concurrent-promotion"
+
+	// Seed 100 due scheduled jobs.
+	for i := 0; i < totalJobs; i++ {
+		jobID := fmt.Sprintf("concurrent-job-%d", i)
+
+		j := job.NewJob("send_email", []byte(`{}`))
+		j.ID = jobID
+		j.Queue = queueName
+
+		data, err := json.Marshal(j)
+		if err != nil {
+			t.Fatalf("marshal job: %v", err)
+		}
+
+		if err := broker1.client.HSet(
+			ctx,
+			"{q}:job:"+jobID,
+			"data", string(data),
+			"state", "scheduled",
+		).Err(); err != nil {
+			t.Fatalf("create job record: %v", err)
+		}
+
+		if err := broker1.client.ZAdd(
+			ctx,
+			"{q}:scheduled",
+			redis.Z{
+				Score:  0,
+				Member: jobID,
+			},
+		).Err(); err != nil {
+			t.Fatalf("add scheduled job: %v", err)
+		}
+	}
+
+	type result struct {
+		promoted int
+		err      error
+	}
+
+	start := make(chan struct{})
+	results := make(chan result, 2)
+
+	// Run both schedulers simultaneously.
+	go func() {
+		<-start
+		count, err := broker1.PromoteScheduled(ctx, totalJobs)
+		results <- result{promoted: count, err: err}
+	}()
+
+	go func() {
+		<-start
+		count, err := broker2.PromoteScheduled(ctx, totalJobs)
+		results <- result{promoted: count, err: err}
+	}()
+
+	close(start)
+
+	totalPromoted := 0
+
+	for i := 0; i < 2; i++ {
+		res := <-results
+		if res.err != nil {
+			t.Fatalf("promotion failed: %v", res.err)
+		}
+		totalPromoted += res.promoted
+	}
+
+	if totalPromoted != totalJobs {
+		t.Fatalf(
+			"expected exactly %d promotions, got %d",
+			totalJobs,
+			totalPromoted,
+		)
+	}
+
+	// Verify pending queue contains every job exactly once.
+	pending, err := broker1.client.LRange(
+		ctx,
+		"{q}:pending:"+queueName,
+		0,
+		-1,
+	).Result()
+	if err != nil {
+		t.Fatalf("read pending queue: %v", err)
+	}
+
+	if len(pending) != totalJobs {
+		t.Fatalf(
+			"expected %d pending jobs, got %d",
+			totalJobs,
+			len(pending),
+		)
+	}
+
+	seen := make(map[string]int, totalJobs)
+
+	for _, data := range pending {
+		var j job.Job
+		if err := json.Unmarshal([]byte(data), &j); err != nil {
+			t.Fatalf("unmarshal pending job: %v", err)
+		}
+		seen[j.ID]++
+	}
+
+	for i := 0; i < totalJobs; i++ {
+		jobID := fmt.Sprintf("concurrent-job-%d", i)
+		if seen[jobID] != 1 {
+			t.Errorf("job %s appeared %d times in pending queue", jobID, seen[jobID])
+		}
+	}
+
+	remaining, err := broker1.client.ZCard(ctx, "{q}:scheduled").Result()
+	if err != nil {
+		t.Fatalf("count scheduled jobs: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("expected 0 scheduled jobs, got %d", remaining)
+	}
+}
