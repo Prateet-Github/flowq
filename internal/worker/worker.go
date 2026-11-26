@@ -27,7 +27,11 @@ type WorkerPool struct {
 	inFlight   map[string]struct{}
 }
 
-const ShutdownTimeout = 30 * time.Second
+const (
+	ShutdownTimeout             = 30 * time.Second
+	scheduledPromotionInterval  = 500 * time.Millisecond
+	scheduledPromotionBatchSize = 500
+)
 
 func NewWorkerPool(workers int, broker queue.Broker, mux *handler.ServeMux, queueName string) *WorkerPool {
 	return &WorkerPool{
@@ -83,6 +87,27 @@ func (p *WorkerPool) inFlightJobs() []string {
 func (p *WorkerPool) Start(ctx context.Context) {
 	var wg sync.WaitGroup
 
+	wg.Go(func() {
+		ticker := time.NewTicker(scheduledPromotionInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case <-ticker.C:
+				_, err := p.broker.PromoteScheduled(
+					ctx,
+					scheduledPromotionBatchSize,
+				)
+				if err != nil && ctx.Err() == nil {
+					log.Printf("failed to promote scheduled jobs: %v", err)
+				}
+			}
+		}
+	})
+
 	shutdownCtx, cancelShutdown := context.WithCancel(context.Background())
 	defer cancelShutdown()
 
@@ -118,11 +143,6 @@ func (p *WorkerPool) Start(ctx context.Context) {
 			for {
 				if ctx.Err() != nil {
 					return
-				}
-
-				_, err := p.broker.PromoteRetries(ctx, 100)
-				if err != nil {
-					log.Printf("failed to promote delayed retries: %v", err)
 				}
 
 				job, err := p.broker.Dequeue(ctx, p.queueName)

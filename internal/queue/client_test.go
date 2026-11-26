@@ -60,7 +60,7 @@ func (m *mockBroker) ScheduleRetry(
 	return nil
 }
 
-func (m *mockBroker) PromoteRetries(
+func (m *mockBroker) PromoteScheduled(
 	ctx context.Context,
 	limit int,
 ) (int, error) {

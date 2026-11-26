@@ -92,7 +92,7 @@ func (m *mockWorkerBroker) ScheduleRetry(
 	return m.scheduleRetryErr
 }
 
-func (m *mockWorkerBroker) PromoteRetries(context.Context, int) (int, error) {
+func (m *mockWorkerBroker) PromoteScheduled(context.Context, int) (int, error) {
 	return 0, nil
 }
 

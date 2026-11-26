@@ -57,12 +57,12 @@ func (b *RedisBroker) ScheduleRetry(
 	return nil
 }
 
-func (b *RedisBroker) PromoteRetries(
+func (b *RedisBroker) PromoteScheduled(
 	ctx context.Context,
 	limit int,
 ) (int, error) {
 	if limit <= 0 {
-		return 0, fmt.Errorf("retry promotion limit must be positive")
+		return 0, fmt.Errorf("scheduled promotion limit must be positive")
 	}
 
 	result, err := promoteRetriesScript.Run(
@@ -74,7 +74,7 @@ func (b *RedisBroker) PromoteRetries(
 	).Int()
 
 	if err != nil {
-		return 0, fmt.Errorf("promote due retries: %w", err)
+		return 0, fmt.Errorf("promote scheduled jobs: %w", err)
 	}
 
 	return result, nil

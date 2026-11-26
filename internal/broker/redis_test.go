@@ -867,7 +867,7 @@ func TestRecoverExpiredPreservesLargeTimeout(t *testing.T) {
 	}
 }
 
-func TestPromoteRetriesMovesDueJobToPending(t *testing.T) {
+func TestPromoteScheduledMovesDueJobToPending(t *testing.T) {
 	broker, ctx := setupRedisBroker(t)
 
 	queueName := "promote-due"
@@ -891,7 +891,7 @@ func TestPromoteRetriesMovesDueJobToPending(t *testing.T) {
 		t.Fatalf("schedule retry failed: %v", err)
 	}
 
-	promoted, err := broker.PromoteRetries(ctx, 100)
+	promoted, err := broker.PromoteScheduled(ctx, 100)
 	if err != nil {
 		t.Fatalf("promote retries failed: %v", err)
 	}
@@ -933,7 +933,7 @@ func TestPromoteRetriesMovesDueJobToPending(t *testing.T) {
 	}
 }
 
-func TestPromoteRetriesKeepsFutureJobScheduled(t *testing.T) {
+func TestPromoteScheduledKeepsFutureJobScheduled(t *testing.T) {
 	broker, ctx := setupRedisBroker(t)
 
 	queueName := "promote-future"
@@ -957,7 +957,7 @@ func TestPromoteRetriesKeepsFutureJobScheduled(t *testing.T) {
 		t.Fatalf("schedule retry failed: %v", err)
 	}
 
-	promoted, err := broker.PromoteRetries(ctx, 100)
+	promoted, err := broker.PromoteScheduled(ctx, 100)
 	if err != nil {
 		t.Fatalf("promote retries failed: %v", err)
 	}
@@ -974,7 +974,7 @@ func TestPromoteRetriesKeepsFutureJobScheduled(t *testing.T) {
 	}
 }
 
-func TestPromoteRetriesRemovesStaleEntries(t *testing.T) {
+func TestPromoteScheduledRemovesStaleEntries(t *testing.T) {
 	broker, ctx := setupRedisBroker(t)
 
 	jobID := "missing-job"
@@ -990,7 +990,7 @@ func TestPromoteRetriesRemovesStaleEntries(t *testing.T) {
 		t.Fatalf("add stale scheduled entry: %v", err)
 	}
 
-	promoted, err := broker.PromoteRetries(ctx, 100)
+	promoted, err := broker.PromoteScheduled(ctx, 100)
 	if err != nil {
 		t.Fatalf("promote retries failed: %v", err)
 	}
@@ -1007,7 +1007,7 @@ func TestPromoteRetriesRemovesStaleEntries(t *testing.T) {
 	}
 }
 
-func TestPromoteRetriesRespectsBatchLimit(t *testing.T) {
+func TestPromoteScheduledRespectsBatchLimit(t *testing.T) {
 	broker, ctx := setupRedisBroker(t)
 
 	const totalJobs = 3
@@ -1046,7 +1046,7 @@ func TestPromoteRetriesRespectsBatchLimit(t *testing.T) {
 		}
 	}
 
-	promoted, err := broker.PromoteRetries(ctx, 2)
+	promoted, err := broker.PromoteScheduled(ctx, 2)
 	if err != nil {
 		t.Fatalf("promote retries failed: %v", err)
 	}
