@@ -19,6 +19,24 @@ func (m *mockBroker) Enqueue(ctx context.Context, j *job.Job) error {
 	return m.enqueueErr
 }
 
+func (m *mockBroker) EnqueueIn(
+	ctx context.Context,
+	j *job.Job,
+	delay time.Duration,
+) error {
+	m.enqueueCalls++
+	return m.enqueueErr
+}
+
+func (m *mockBroker) EnqueueAt(
+	ctx context.Context,
+	j *job.Job,
+	at time.Time,
+) error {
+	m.enqueueCalls++
+	return m.enqueueErr
+}
+
 func (m *mockBroker) Dequeue(ctx context.Context, queueName string) (*job.Job, error) {
 	return nil, nil
 }

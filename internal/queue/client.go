@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/Prateet-Github/flowq/internal/job"
@@ -39,9 +40,34 @@ func NewClient(b Broker) *Client {
 	}
 }
 
-func (c *Client) Enqueue(ctx context.Context, j *job.Job) error {
+func (c *Client) Enqueue(
+	ctx context.Context,
+	j *job.Job,
+	options ...EnqueueOption,
+) error {
 	if err := j.Validate(); err != nil {
 		return err
+	}
+
+	opts := &EnqueueOptions{}
+
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+		option(opts)
+	}
+
+	if opts.delay < 0 {
+		return fmt.Errorf("enqueue delay cannot be negative")
+	}
+
+	if opts.processAt != nil {
+		return c.broker.EnqueueAt(ctx, j, *opts.processAt)
+	}
+
+	if opts.delay > 0 {
+		return c.broker.EnqueueIn(ctx, j, opts.delay)
 	}
 
 	return c.broker.Enqueue(ctx, j)

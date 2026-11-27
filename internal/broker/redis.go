@@ -35,16 +35,20 @@ var dlqLua string
 //go:embed scripts/worker_heartbeat.lua
 var workerHeartbeatLua string
 
+//go:embed scripts/enqueue_scheduled.lua
+var enqueueScheduledLua string
+
 var (
-	dequeueScript         = redis.NewScript(dequeueLua)
-	ackScript             = redis.NewScript(ackLua)
-	recoverScript         = redis.NewScript(recoverLua)
-	renewScript           = redis.NewScript(renewLua)
-	releaseScript         = redis.NewScript(releaseLua)
-	retryScript           = redis.NewScript(retryLua)
-	promoteRetriesScript  = redis.NewScript(promoteRetriesLua)
-	dlqScript             = redis.NewScript(dlqLua)
-	workerHeartbeatScript = redis.NewScript(workerHeartbeatLua)
+	dequeueScript          = redis.NewScript(dequeueLua)
+	ackScript              = redis.NewScript(ackLua)
+	recoverScript          = redis.NewScript(recoverLua)
+	renewScript            = redis.NewScript(renewLua)
+	releaseScript          = redis.NewScript(releaseLua)
+	retryScript            = redis.NewScript(retryLua)
+	promoteRetriesScript   = redis.NewScript(promoteRetriesLua)
+	dlqScript              = redis.NewScript(dlqLua)
+	workerHeartbeatScript  = redis.NewScript(workerHeartbeatLua)
+	enqueueScheduledScript = redis.NewScript(enqueueScheduledLua)
 )
 
 type RedisBroker struct {

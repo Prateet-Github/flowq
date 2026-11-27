@@ -32,6 +32,22 @@ func (m *mockWorkerBroker) Enqueue(context.Context, *job.Job) error {
 	return nil
 }
 
+func (m *mockWorkerBroker) EnqueueIn(
+	ctx context.Context,
+	j *job.Job,
+	delay time.Duration,
+) error {
+	return nil
+}
+
+func (m *mockWorkerBroker) EnqueueAt(
+	ctx context.Context,
+	j *job.Job,
+	at time.Time,
+) error {
+	return nil
+}
+
 func (m *mockWorkerBroker) Dequeue(context.Context, string) (*job.Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
