@@ -1212,3 +1212,172 @@ func TestConcurrentPromoteScheduledDoesNotDuplicateJobs(t *testing.T) {
 		t.Fatalf("expected 0 scheduled jobs, got %d", remaining)
 	}
 }
+
+func TestEnqueueInSchedulesFutureJob(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	j := job.NewJob("send_email", []byte(`{}`))
+	j.Queue = "test"
+
+	delay := time.Minute
+
+	if err := broker.EnqueueIn(ctx, j, delay); err != nil {
+		t.Fatalf("EnqueueIn failed: %v", err)
+	}
+
+	pendingKey := "{q}:pending:test"
+	scheduledKey := "{q}:scheduled"
+	jobKey := "{q}:job:" + j.ID
+
+	if length := broker.client.LLen(ctx, pendingKey).Val(); length != 0 {
+		t.Fatalf("expected pending queue to be empty, got %d jobs", length)
+	}
+
+	score, err := broker.client.ZScore(ctx, scheduledKey, j.ID).Result()
+	if err != nil {
+		t.Fatalf("expected job in scheduled set: %v", err)
+	}
+
+	if score <= float64(time.Now().UnixMilli()) {
+		t.Fatalf("expected future scheduled timestamp, got %f", score)
+	}
+
+	state, err := broker.client.HGet(ctx, jobKey, "state").Result()
+	if err != nil {
+		t.Fatalf("failed to get job state: %v", err)
+	}
+
+	if state != "scheduled" {
+		t.Fatalf("expected state scheduled, got %s", state)
+	}
+
+	data, err := broker.client.HGet(ctx, jobKey, "data").Result()
+	if err != nil {
+		t.Fatalf("failed to get job data: %v", err)
+	}
+
+	var stored job.Job
+	if err := json.Unmarshal([]byte(data), &stored); err != nil {
+		t.Fatalf("failed to unmarshal stored job: %v", err)
+	}
+
+	if stored.ID != j.ID {
+		t.Fatalf("expected job ID %s, got %s", j.ID, stored.ID)
+	}
+}
+
+func TestEnqueueAtSchedulesFutureJob(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	j := job.NewJob("send_email", []byte(`{}`))
+	j.Queue = "test"
+
+	processAt := time.Now().Add(time.Minute)
+
+	if err := broker.EnqueueAt(ctx, j, processAt); err != nil {
+		t.Fatalf("EnqueueAt failed: %v", err)
+	}
+
+	pendingKey := "{q}:pending:test"
+	scheduledKey := "{q}:scheduled"
+	jobKey := "{q}:job:" + j.ID
+
+	if length := broker.client.LLen(ctx, pendingKey).Val(); length != 0 {
+		t.Fatalf("expected pending queue to be empty, got %d jobs", length)
+	}
+
+	score, err := broker.client.ZScore(ctx, scheduledKey, j.ID).Result()
+	if err != nil {
+		t.Fatalf("expected job in scheduled set: %v", err)
+	}
+
+	expectedScore := float64(processAt.UnixMilli())
+	if score != expectedScore {
+		t.Fatalf("expected scheduled timestamp %f, got %f", expectedScore, score)
+	}
+
+	state, err := broker.client.HGet(ctx, jobKey, "state").Result()
+	if err != nil {
+		t.Fatalf("failed to get job state: %v", err)
+	}
+
+	if state != "scheduled" {
+		t.Fatalf("expected state scheduled, got %s", state)
+	}
+}
+
+func TestEnqueueAtPastTimestampEnqueuesImmediately(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	j := job.NewJob("send_email", []byte(`{}`))
+	j.Queue = "test"
+
+	if err := broker.EnqueueAt(ctx, j, time.Now().Add(-time.Minute)); err != nil {
+		t.Fatalf("EnqueueAt failed: %v", err)
+	}
+
+	pendingKey := "{q}:pending:test"
+	scheduledKey := "{q}:scheduled"
+
+	if length := broker.client.LLen(ctx, pendingKey).Val(); length != 1 {
+		t.Fatalf("expected 1 pending job, got %d", length)
+	}
+
+	if exists := broker.client.ZScore(ctx, scheduledKey, j.ID).Err(); exists == nil {
+		t.Fatal("expected job not to be in scheduled set")
+	} else if exists != redis.Nil {
+		t.Fatalf("failed checking scheduled set: %v", exists)
+	}
+
+	data, err := broker.client.LIndex(ctx, pendingKey, 0).Result()
+	if err != nil {
+		t.Fatalf("failed to get pending job: %v", err)
+	}
+
+	var stored job.Job
+	if err := json.Unmarshal([]byte(data), &stored); err != nil {
+		t.Fatalf("failed to unmarshal pending job: %v", err)
+	}
+
+	if stored.ID != j.ID {
+		t.Fatalf("expected job ID %s, got %s", j.ID, stored.ID)
+	}
+}
+
+func TestEnqueueInZeroDelayEnqueuesImmediately(t *testing.T) {
+	broker, ctx := setupRedisBroker(t)
+
+	j := job.NewJob("send_email", []byte(`{}`))
+	j.Queue = "test"
+
+	if err := broker.EnqueueIn(ctx, j, 0); err != nil {
+		t.Fatalf("EnqueueIn failed: %v", err)
+	}
+
+	pendingKey := "{q}:pending:test"
+	scheduledKey := "{q}:scheduled"
+
+	if length := broker.client.LLen(ctx, pendingKey).Val(); length != 1 {
+		t.Fatalf("expected 1 pending job, got %d", length)
+	}
+
+	if exists := broker.client.ZScore(ctx, scheduledKey, j.ID).Err(); exists == nil {
+		t.Fatal("expected job not to be in scheduled set")
+	} else if exists != redis.Nil {
+		t.Fatalf("failed checking scheduled set: %v", exists)
+	}
+
+	data, err := broker.client.LIndex(ctx, pendingKey, 0).Result()
+	if err != nil {
+		t.Fatalf("failed to get pending job: %v", err)
+	}
+
+	var stored job.Job
+	if err := json.Unmarshal([]byte(data), &stored); err != nil {
+		t.Fatalf("failed to unmarshal pending job: %v", err)
+	}
+
+	if stored.ID != j.ID {
+		t.Fatalf("expected job ID %s, got %s", j.ID, stored.ID)
+	}
+}
