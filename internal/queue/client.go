@@ -52,10 +52,9 @@ func (c *Client) Enqueue(
 	opts := &EnqueueOptions{}
 
 	for _, option := range options {
-		if option == nil {
-			continue
+		if option != nil {
+			option(opts)
 		}
-		option(opts)
 	}
 
 	if opts.delay < 0 {

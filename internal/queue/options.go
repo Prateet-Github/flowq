@@ -19,5 +19,6 @@ func ProcessIn(duration time.Duration) EnqueueOption {
 func ProcessAt(timestamp time.Time) EnqueueOption {
 	return func(opts *EnqueueOptions) {
 		opts.processAt = &timestamp
+		opts.delay = 0
 	}
 }

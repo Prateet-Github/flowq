@@ -10,8 +10,12 @@ import (
 )
 
 type mockBroker struct {
-	enqueueErr   error
-	enqueueCalls int
+	enqueueErr     error
+	enqueueCalls   int
+	enqueueInCalls int
+	enqueueAtCalls int
+	lastDelay      time.Duration
+	lastProcessAt  time.Time
 }
 
 func (m *mockBroker) Enqueue(ctx context.Context, j *job.Job) error {
@@ -24,7 +28,8 @@ func (m *mockBroker) EnqueueIn(
 	j *job.Job,
 	delay time.Duration,
 ) error {
-	m.enqueueCalls++
+	m.enqueueInCalls++
+	m.lastDelay = delay
 	return m.enqueueErr
 }
 
@@ -33,7 +38,8 @@ func (m *mockBroker) EnqueueAt(
 	j *job.Job,
 	at time.Time,
 ) error {
-	m.enqueueCalls++
+	m.enqueueAtCalls++
+	m.lastProcessAt = at
 	return m.enqueueErr
 }
 
@@ -183,6 +189,88 @@ func TestClientEnqueue(t *testing.T) {
 					)
 				}
 			})
+		}
+	})
+}
+
+func TestClientEnqueueOptions(t *testing.T) {
+	t.Run("ProcessIn", func(t *testing.T) {
+		broker := &mockBroker{}
+		client := NewClient(broker)
+
+		delay := 30 * time.Second
+		err := client.Enqueue(
+			context.Background(),
+			job.NewJob("send_email", []byte(`{}`)),
+			ProcessIn(delay),
+		)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if broker.enqueueInCalls != 1 {
+			t.Fatalf("expected 1 EnqueueIn call, got %d", broker.enqueueInCalls)
+		}
+		if broker.lastDelay != delay {
+			t.Fatalf("expected delay %v, got %v", delay, broker.lastDelay)
+		}
+	})
+
+	t.Run("ProcessAt", func(t *testing.T) {
+		broker := &mockBroker{}
+		client := NewClient(broker)
+
+		at := time.Now().Add(time.Hour).Truncate(time.Millisecond)
+		err := client.Enqueue(
+			context.Background(),
+			job.NewJob("send_email", []byte(`{}`)),
+			ProcessAt(at),
+		)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if broker.enqueueAtCalls != 1 {
+			t.Fatalf("expected 1 EnqueueAt call, got %d", broker.enqueueAtCalls)
+		}
+		if !broker.lastProcessAt.Equal(at) {
+			t.Fatalf("expected time %v, got %v", at, broker.lastProcessAt)
+		}
+	})
+
+	t.Run("zero delay uses immediate enqueue", func(t *testing.T) {
+		broker := &mockBroker{}
+		client := NewClient(broker)
+
+		err := client.Enqueue(
+			context.Background(),
+			job.NewJob("send_email", []byte(`{}`)),
+			ProcessIn(0),
+		)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if broker.enqueueCalls != 1 {
+			t.Fatalf("expected 1 immediate enqueue call, got %d", broker.enqueueCalls)
+		}
+	})
+
+	t.Run("negative delay is rejected", func(t *testing.T) {
+		broker := &mockBroker{}
+		client := NewClient(broker)
+
+		err := client.Enqueue(
+			context.Background(),
+			job.NewJob("send_email", []byte(`{}`)),
+			ProcessIn(-time.Second),
+		)
+
+		if err == nil {
+			t.Fatal("expected negative delay error")
+		}
+		if broker.enqueueCalls+broker.enqueueInCalls+broker.enqueueAtCalls != 0 {
+			t.Fatal("broker should not be called for negative delay")
 		}
 	})
 }
