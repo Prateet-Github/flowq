@@ -25,6 +25,8 @@ type Broker interface {
 	) error
 	UnregisterWorker(ctx context.Context, workerID string) error
 	LeaseDuration() time.Duration
+	EnqueueIn(ctx context.Context, j *job.Job, delay time.Duration) error
+	EnqueueAt(ctx context.Context, j *job.Job, at time.Time) error
 }
 
 type Client struct {
